@@ -45,7 +45,26 @@ namespace snmalloc
     PMNotOurs = 0,
     PMSuperslab = 1,
     PMMediumslab = 2
+
+    /*
+     * Values SUPERSLAB_BITS (inclusive) through 64 (exclusive, as it would
+     * represent the entire address space) are used for log2(size) at the
+     * heads of large allocations.  See SuperslabMap::set_large_size.
+     *
+     * Values 64 (inclusive) through 128 (exclusive) are used for entries
+     * within a large allocation.  A value of x at pagemap entry p indicates
+     * that there are at least 2^(x-64) (inclusive) and at most 2^(x+1-64)
+     * (exclusive) page map entries between p and the start of the
+     * allocation.  See SuperslabMap::set_large_size and external_address's
+     * handling of large reallocation redirections.
+     *
+     * Values 128 (inclusive) through 255 (inclusive) are as yet unused.
+     */
+
   };
+
+  /* Ensure that PageMapSuperslabKind values are actually disjoint */
+  static_assert(SUPERSLAB_BITS > 2, "Large allocations possibly too small");
 
 #ifndef SNMALLOC_MAX_FLATPAGEMAP_SIZE
 // Use flat map is under a single node.
@@ -132,6 +151,9 @@ namespace snmalloc
     using PagemapProvider::PagemapProvider;
     /**
      * Get the pagemap entry corresponding to a specific address.
+     *
+     * Despite the type, the return value is an enum PageMapSuperslabKind
+     * or one of the reserved values described therewith.
      */
     uint8_t get(address_t p)
     {
@@ -459,7 +481,7 @@ namespace snmalloc
         RemoteAllocator* target = slab->get_allocator();
 
         // Reading a remote sizeclass won't fail, since the other allocator
-        // can't reuse the slab, as we have no yet deallocated this pointer.
+        // can't reuse the slab, as we have not yet deallocated this pointer.
         uint8_t sizeclass = slab->get_sizeclass();
 
         if (target == public_state())
