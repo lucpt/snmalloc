@@ -14,8 +14,6 @@
 #else
 #  define likely(x) __builtin_expect(!!(x), 1)
 #  define unlikely(x) __builtin_expect(!!(x), 0)
-#  include <cpuid.h>
-#  include <emmintrin.h>
 #  define ALWAYSINLINE __attribute__((always_inline))
 #  define NOINLINE __attribute__((noinline))
 #  ifdef __clang__
@@ -30,6 +28,10 @@
 #if defined(__i386__) || defined(_M_IX86) || defined(_X86_) || \
   defined(__amd64__) || defined(__x86_64__) || defined(_M_X64) || \
   defined(_M_AMD64)
+#  ifndef _MSC_VER
+#    include <cpuid.h>
+#  endif
+#  include <emmintrin.h>
 #  define PLATFORM_IS_X86
 #  if defined(__linux__) && !defined(OPEN_ENCLAVE)
 #    include <x86intrin.h>
@@ -113,7 +115,9 @@ namespace snmalloc
 
     inline void pause()
     {
-#if defined(PLATFORM_IS_X86)
+#if __has_builtin(__builtin_pause)
+      __builtin_pause();
+#elif defined(PLATFORM_IS_X86)
       _mm_pause();
 #else
 #  warning "Missing pause intrinsic"
@@ -122,11 +126,13 @@ namespace snmalloc
 
     inline uint64_t tick()
     {
-#if defined(PLATFORM_IS_X86)
+#if __has_builtin(__builtin_readcyclecounter)
+      return __builtin_readcyclecounter();
+#elif defined(PLATFORM_IS_X86)
 #  if defined(_MSC_VER)
       return __rdtsc();
 #  elif defined(__clang__)
-      return __builtin_readcyclecounter();
+#    error clang without readcyclecounter?
 #  else
       return __builtin_ia32_rdtsc();
 #  endif
@@ -146,7 +152,7 @@ namespace snmalloc
       return __builtin_ia32_rdtscp(&aux);
 #  endif
 #else
-#  error Define CPU tick for this platform
+#  error Define serializing CPU tick for this platform
 #endif
     }
 
@@ -161,7 +167,7 @@ namespace snmalloc
       __get_cpuid(0, &eax, &ebx, &ecx, &edx);
 #  endif
 #else
-#  error Define CPU benchmark start time for this platform
+#  error Define speculation barrier for this platform
 #endif
     }
 

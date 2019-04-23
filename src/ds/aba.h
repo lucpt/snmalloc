@@ -63,7 +63,12 @@ namespace snmalloc
 
     T* peek()
     {
-      return independent.ptr.load(std::memory_order_relaxed);
+      return
+#ifdef PLATFORM_IS_X86
+        independent.ptr.load(std::memory_order_relaxed);
+#else
+        ptr.load(std::memory_order_relaxed);
+#endif
     }
 
     Cmp read()
