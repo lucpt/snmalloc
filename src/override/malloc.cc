@@ -18,7 +18,7 @@ extern "C"
 {
   SNMALLOC_EXPORT void* SNMALLOC_NAME_MANGLE(__malloc_end_pointer)(void* ptr)
   {
-    return Alloc::external_pointer<OnePastEnd>(ptr);
+    return ThreadAlloc::get()->external_pointer<OnePastEnd>(ptr);
   }
 
   SNMALLOC_EXPORT void* SNMALLOC_NAME_MANGLE(malloc)(size_t size)
@@ -45,7 +45,7 @@ extern "C"
 
   SNMALLOC_EXPORT size_t SNMALLOC_NAME_MANGLE(malloc_usable_size)(void* ptr)
   {
-    return Alloc::alloc_size(ptr);
+    return ThreadAlloc::get()->alloc_size(ptr);
   }
 
   SNMALLOC_EXPORT void* SNMALLOC_NAME_MANGLE(realloc)(void* ptr, size_t size)
@@ -64,16 +64,19 @@ extern "C"
       SNMALLOC_NAME_MANGLE(free)(ptr);
       return nullptr;
     }
+
+    auto a = ThreadAlloc::get();
+
 #ifndef NDEBUG
     // This check is redundant, because the check in memcpy will fail if this
     // is skipped, but it's useful for debugging.
-    if (Alloc::external_pointer<Start>(ptr) != ptr)
+    if (a->external_pointer<Start>(ptr) != ptr)
     {
       error(
         "Calling realloc on pointer that is not to the start of an allocation");
     }
 #endif
-    size_t sz = Alloc::alloc_size(ptr);
+    size_t sz = a->alloc_size(ptr);
     // Keep the current allocation if the given size is in the same sizeclass.
     if (sz == sizeclass_to_size(size_to_sizeclass(size)))
       return ptr;
@@ -81,7 +84,7 @@ extern "C"
     void* p = SNMALLOC_NAME_MANGLE(malloc)(size);
     if (p != nullptr)
     {
-      assert(p == Alloc::external_pointer<Start>(p));
+      assert(p == a->external_pointer<Start>(p));
       sz = bits::min(size, sz);
       memcpy(p, ptr, sz);
       SNMALLOC_NAME_MANGLE(free)(ptr);
