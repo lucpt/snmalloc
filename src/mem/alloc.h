@@ -500,13 +500,13 @@ namespace snmalloc
     }
 
     template<Boundary location = Start>
-    static address_t external_address(void* p)
+    address_t external_address(void* p)
     {
 #ifdef USE_MALLOC
       error("Unsupported");
       UNUSED(p);
 #else
-      uint8_t size = global_pagemap.get(address_cast(p));
+      uint8_t size = pagemap().get(address_cast(p));
 
       Superslab* super = Superslab::get(p);
       if (size == PMSuperslab)
@@ -536,7 +536,7 @@ namespace snmalloc
       {
         // This is a large alloc redirect.
         ss = ss - (1ULL << (size - 64));
-        size = global_pagemap.get(ss);
+        size = pagemap().get(ss);
       }
 
       if (size == 0)
@@ -560,15 +560,15 @@ namespace snmalloc
     }
 
     template<Boundary location = Start>
-    static void* external_pointer(void* p)
+    void* external_pointer(void* p)
     {
       return pointer_cast<void>(external_address<location>(p));
     }
 
-    static size_t alloc_size(void* p)
+    size_t alloc_size(void* p)
     {
       // This must be called on an external pointer.
-      size_t size = global_pagemap.get(address_cast(p));
+      size_t size = pagemap().get(address_cast(p));
 
       if (size == 0)
       {
