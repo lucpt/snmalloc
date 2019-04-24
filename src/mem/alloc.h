@@ -64,18 +64,45 @@ namespace snmalloc
   /* Ensure that PageMapSuperslabKind values are actually disjoint */
   static_assert(SUPERSLAB_BITS > 2, "Large allocations possibly too small");
 
+  /*
+   * In CHERI, we have to be able to rederive pointers to headers and
+   * metadata given the address of the allocation, since the capabilities we
+   * give out have bounds narrowed to the allocation itself.  Since snmalloc
+   * already holds a map of the address space, here's a great place to do
+   * that.  Rather than store sizes per each SUPERSLAB_SIZE sized piece of
+   * memory, we store a capability.
+   *
+   * We have a lot of "metadata" bits at the least-significant end of the
+   * address of a capability in this map, since its bounds must, at least,
+   * cover a SUPERSLAB_SIZE sized object (or a large allocation).  To
+   * minimize churn, we stash the existing enum PageMapSuperslabKind values
+   * in the bottom 8 bits of the address.
+   *
+   * We could cut that down to 6 bits by reclaiming all values above 64; we
+   * can test that the capability given to us to free is has address equal
+   * to the base of the capability stored here in the page map.
+   */
+  static constexpr void* PMNotOursPtr = NULL;
+  static constexpr int PAGEMAP_PTR_ALIGN = 0x100;
+
+  using PAGEMAP_VALUE_T =
+    std::conditional_t<SNMALLOC_PAGEMAP_POINTERS, void*, uint8_t>;
+  static constexpr PAGEMAP_VALUE_T PAGEMAP_VALUE_Z = 0;
+
 #ifndef SNMALLOC_MAX_FLATPAGEMAP_SIZE
 // Use flat map is under a single node.
 #  define SNMALLOC_MAX_FLATPAGEMAP_SIZE PAGEMAP_NODE_SIZE
 #endif
-  static constexpr bool USE_FLATPAGEMAP = pal_supports<LazyCommit>() ||
+  static constexpr bool USE_FLATPAGEMAP =
+    (pal_supports<LazyCommit>() &&
+     ((1 << 24) >= sizeof(FlatPagemap<SUPERSLAB_BITS, PAGEMAP_VALUE_T>))) ||
     (SNMALLOC_MAX_FLATPAGEMAP_SIZE >=
-     sizeof(FlatPagemap<SUPERSLAB_BITS, uint8_t>));
+     sizeof(FlatPagemap<SUPERSLAB_BITS, PAGEMAP_VALUE_T>));
 
   using SuperslabPagemap = std::conditional_t<
     USE_FLATPAGEMAP,
-    FlatPagemap<SUPERSLAB_BITS, uint8_t>,
-    Pagemap<SUPERSLAB_BITS, uint8_t, 0>>;
+    FlatPagemap<SUPERSLAB_BITS, PAGEMAP_VALUE_T>,
+    Pagemap<SUPERSLAB_BITS, PAGEMAP_VALUE_T, PAGEMAP_VALUE_Z>>;
 
   HEADER_GLOBAL SuperslabPagemap global_pagemap;
 
@@ -156,7 +183,14 @@ namespace snmalloc
      */
     uint8_t get(address_t p)
     {
-      return PagemapProvider::pagemap().get(p);
+      if constexpr (SNMALLOC_PAGEMAP_POINTERS)
+      {
+        return (uintptr_t)(PagemapProvider::pagemap().get(p));
+      }
+      else
+      {
+        return PagemapProvider::pagemap().get(p);
+      }
     }
 
     /**
@@ -168,19 +202,65 @@ namespace snmalloc
     }
 
     /**
+     * Fetch a pointer through the pagemap.  The return value and the
+     * argument point at the same location, if the template parameter offset
+     * is true, but may have different metadata associated with them, such
+     * as CHERI bounds.  If the pagemap is storing pointers, then the
+     * template parameter offset may be false, in which case, the return
+     * value is exactly the pagemap entry, which will point at the bottom of
+     * the pagemap granule and include the argument in its bounds.
+     */
+    template<bool offset = true>
+    void* getp(void* p)
+    {
+      if constexpr (SNMALLOC_PAGEMAP_POINTERS)
+      {
+        void* pmp = pointer_align_down<PAGEMAP_PTR_ALIGN, void>(
+          PagemapProvider::pagemap().get(address_cast(p)));
+        if constexpr (offset)
+        {
+          return (void*)(pointer_offset(pmp, pointer_diff(pmp, p)));
+        }
+        else
+        {
+          return pmp;
+        }
+      }
+      else
+      {
+        static_assert(offset);
+        return p;
+      }
+    }
+
+    /**
      * Set a pagemap entry indicating that there is a superslab at the
      * specified index.
      */
     void set_slab(Superslab* slab)
     {
-      set(slab, static_cast<size_t>(PMSuperslab));
+      if constexpr (SNMALLOC_PAGEMAP_POINTERS)
+      {
+        set(slab, pointer_offset(slab, PMSuperslab));
+      }
+      else
+      {
+        set(slab, static_cast<size_t>(PMSuperslab));
+      }
     }
     /**
      * Add a pagemap entry indicating that a medium slab has been allocated.
      */
     void set_slab(Mediumslab* slab)
     {
-      set(slab, static_cast<size_t>(PMMediumslab));
+      if constexpr (SNMALLOC_PAGEMAP_POINTERS)
+      {
+        set(slab, pointer_offset(slab, PMMediumslab));
+      }
+      else
+      {
+        set(slab, static_cast<size_t>(PMMediumslab));
+      }
     }
     /**
      * Remove an entry from the pagemap corresponding to a superslab.
@@ -188,7 +268,14 @@ namespace snmalloc
     void clear_slab(Superslab* slab)
     {
       assert(get(slab) == PMSuperslab);
-      set(slab, static_cast<size_t>(PMNotOurs));
+      if constexpr (SNMALLOC_PAGEMAP_POINTERS)
+      {
+        set(slab, PMNotOursPtr);
+      }
+      else
+      {
+        set(slab, static_cast<size_t>(PMNotOurs));
+      }
     }
     /**
      * Remove an entry corresponding to a medium slab.
@@ -196,7 +283,14 @@ namespace snmalloc
     void clear_slab(Mediumslab* slab)
     {
       assert(get(slab) == PMMediumslab);
-      set(slab, static_cast<size_t>(PMNotOurs));
+      if constexpr (SNMALLOC_PAGEMAP_POINTERS)
+      {
+        set(slab, PMNotOursPtr);
+      }
+      else
+      {
+        set(slab, static_cast<size_t>(PMNotOurs));
+      }
     }
     /**
      * Update the pagemap to reflect a large allocation, of `size` bytes from
@@ -205,15 +299,31 @@ namespace snmalloc
     void set_large_size(void* p, size_t size)
     {
       size_t size_bits = bits::next_pow2_bits(size);
-      set(p, static_cast<uint8_t>(size_bits));
-      // Set redirect slide
-      auto ss = address_cast(p) + SUPERSLAB_SIZE;
-      for (size_t i = 0; i < size_bits - SUPERSLAB_BITS; i++)
+      if constexpr (SNMALLOC_PAGEMAP_POINTERS)
       {
-        size_t run = 1ULL << i;
-        PagemapProvider::pagemap().set_range(
-          ss, static_cast<uint8_t>(64 + i + SUPERSLAB_BITS), run);
-        ss = ss + SUPERSLAB_SIZE * run;
+        set(p, pointer_offset(p, size_bits));
+        // Set redirect slide
+        char* ss = reinterpret_cast<char*>(pointer_offset(p, SUPERSLAB_SIZE));
+        for (size_t i = 0; i < size_bits - SUPERSLAB_BITS; i++)
+        {
+          size_t run = 1ULL << i;
+          PagemapProvider::pagemap().set_range(
+            address_cast(ss), pointer_offset(p, 64 + i + SUPERSLAB_BITS), run);
+          ss += SUPERSLAB_SIZE * run;
+        }
+      }
+      else
+      {
+        set(p, static_cast<uint8_t>(size_bits));
+        // Set redirect slide
+        auto ss = address_cast(p) + SUPERSLAB_SIZE;
+        for (size_t i = 0; i < size_bits - SUPERSLAB_BITS; i++)
+        {
+          size_t run = 1ULL << i;
+          PagemapProvider::pagemap().set_range(
+            ss, static_cast<uint8_t>(64 + i + SUPERSLAB_BITS), run);
+          ss = ss + SUPERSLAB_SIZE * run;
+        }
       }
     }
     /**
@@ -226,7 +336,14 @@ namespace snmalloc
       size_t rounded_size = bits::next_pow2(size);
       assert(get(p) == bits::next_pow2_bits(size));
       auto count = rounded_size >> SUPERSLAB_BITS;
-      PagemapProvider::pagemap().set_range(p, PMNotOurs, count);
+      if constexpr (SNMALLOC_PAGEMAP_POINTERS)
+      {
+        PagemapProvider::pagemap().set_range(p, PMNotOursPtr, count);
+      }
+      else
+      {
+        PagemapProvider::pagemap().set_range(p, PMNotOurs, count);
+      }
     }
 
   private:
@@ -235,7 +352,7 @@ namespace snmalloc
      * interface and exists to make it easy to reuse the code in the public
      * methods in other pagemap adaptors.
      */
-    void set(void* p, uint8_t x)
+    void set(void* p, PAGEMAP_VALUE_T x)
     {
       PagemapProvider::pagemap().set(address_cast(p), x);
     }

@@ -241,7 +241,7 @@ namespace snmalloc
         (c->version != 1) || (c->is_flat_pagemap) ||
         (c->sizeof_pointer != sizeof(uintptr_t)) ||
         (c->pagemap_bits != GRANULARITY_BITS) ||
-        (c->size_of_entry != sizeof(T)) || (!std::is_integral_v<T>))
+        (c->size_of_entry != sizeof(T)))
       {
         return nullptr;
       }

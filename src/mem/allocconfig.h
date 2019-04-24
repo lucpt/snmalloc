@@ -8,6 +8,10 @@ namespace snmalloc
 #  define SNMALLOC_CHERI_ALIGN 0
 #endif
 
+#ifndef SNMALLOC_PAGEMAP_POINTERS
+#  define SNMALLOC_PAGEMAP_POINTERS 0
+#endif
+
 // The CHECK_CLIENT macro is used to turn on minimal checking of the client
 // calling the API correctly.
 #if !defined(NDEBUG) && !defined(CHECK_CLIENT)
