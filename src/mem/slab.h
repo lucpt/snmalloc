@@ -39,7 +39,7 @@ namespace snmalloc
 
       assert(rsize == sizeclass_to_size(meta.sizeclass));
       meta.debug_slab_invariant(is_short(), this);
-      assert(sc->get_head() == (SlabLink*)((size_t)this + meta.link));
+      assert(sc->get_head() == (SlabLink*)pointer_offset(this, meta.link));
       assert(!meta.is_full());
 
       meta.add_use();
