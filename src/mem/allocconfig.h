@@ -12,6 +12,14 @@ namespace snmalloc
 #  define SNMALLOC_PAGEMAP_POINTERS 0
 #endif
 
+#ifndef SNMALLOC_PAGEMAP_REDERIVE
+#  define SNMALLOC_PAGEMAP_REDERIVE 0
+#endif
+
+#if (SNMALLOC_PAGEMAP_REDERIVE == 1) && (SNMALLOC_PAGEMAP_POINTERS == 0)
+#  error Need pointers in pagemap for rederivation
+#endif
+
 // The CHECK_CLIENT macro is used to turn on minimal checking of the client
 // calling the API correctly.
 #if !defined(NDEBUG) && !defined(CHECK_CLIENT)
