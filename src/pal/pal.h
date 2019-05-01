@@ -10,6 +10,7 @@ namespace snmalloc
 // If simultating OE, then we need the underlying platform
 #if !defined(OPEN_ENCLAVE) || defined(OPEN_ENCLAVE_SIMULATION)
 #  include "pal_apple.h"
+#  include "pal_cheribsd.h"
 #  include "pal_free_bsd_kernel.h"
 #  include "pal_freebsd.h"
 #  include "pal_linux.h"
@@ -31,7 +32,11 @@ namespace snmalloc
 #  elif defined(FreeBSD_KERNEL)
     PALFreeBSDKernel;
 #  elif defined(__FreeBSD__)
+#    if defined(__CHERI_PURE_CAPABILITY__)
+    PALCHERIBSD;
+#    else
     PALFBSD;
+#    endif
 #  else
 #    error Unsupported platform
 #  endif
