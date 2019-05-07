@@ -16,7 +16,7 @@ namespace snmalloc
   public:
     static Slab* get(void* p)
     {
-      return pointer_cast<Slab>(address_cast(p) & SLAB_MASK);
+      return pointer_align_down<SLAB_SIZE, Slab>(p);
     }
 
     Metaslab& get_meta()
@@ -162,7 +162,7 @@ namespace snmalloc
 
     bool is_short()
     {
-      return (address_cast(this) & SUPERSLAB_MASK) == address_cast(this);
+      return pointer_align_down<SUPERSLAB_SIZE>(this) == this;
     }
   };
 } // namespace snmalloc

@@ -39,4 +39,33 @@ namespace snmalloc
   {
     return reinterpret_cast<T*>(address);
   }
+
+  template<size_t granule, typename T = void>
+  inline T* pointer_align_down(void* p)
+  {
+    static_assert(granule > 0);
+    static_assert((granule & (granule - 1)) == 0);
+#if defined(__has_builtin) && __has_builtin(__builtin_align_down)
+    return reinterpret_cast<T*>(__builtin_align_down(p, granule));
+#else
+    /* XREF bits::align_down; can't use here for cyclic deps */
+    size_t align_1 = granule - 1;
+    return reinterpret_cast<T*>(reinterpret_cast<uintptr_t>(p) & ~align_1);
+#endif
+  }
+
+  template<size_t granule, typename T = void>
+  inline T* pointer_align_up(void* p)
+  {
+    static_assert(granule > 0);
+    static_assert((granule & (granule - 1)) == 0);
+#if defined(__has_builtin) && __has_builtin(__builtin_align_up)
+    return reinterpret_cast<T*>(__builtin_align_up(p, granule));
+#else
+    /* XREF bits::align_up; can't use here for cyclic deps */
+    size_t align_1 = granule - 1;
+    return reinterpret_cast<T*>(
+      reinterpret_cast<uintptr_t>(pointer_offset(p, align_1)) & ~align_1);
+#endif
+  }
 } // namespace snmalloc
