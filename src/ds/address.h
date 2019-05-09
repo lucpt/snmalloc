@@ -2,6 +2,10 @@
 #include <cassert>
 #include <cstdint>
 
+#ifdef __CHERI_PURE_CAPABILITY__
+#  include <cheri/cheric.h>
+#endif
+
 namespace snmalloc
 {
   /**
@@ -19,7 +23,11 @@ namespace snmalloc
   template<typename T>
   inline T* pointer_offset(T* base, size_t diff)
   {
-    return reinterpret_cast<T*>(reinterpret_cast<uint8_t*>(base) + diff);
+    T* r = reinterpret_cast<T*>(reinterpret_cast<uint8_t*>(base) + diff);
+#ifdef __CHERI_PURE_CAPABILITY__
+    assert(cheri_gettag(base) == cheri_gettag(r));
+#endif
+    return r;
   }
 
   /**
