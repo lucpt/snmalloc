@@ -70,6 +70,21 @@ namespace snmalloc
 #endif
   }
 
+  template<typename T = void>
+  inline T* pointer_align_up_dyn(void* p, size_t granule)
+  {
+    assert(granule > 0);
+    assert((granule & (granule - 1)) == 0);
+#if defined(__has_builtin) && __has_builtin(__builtin_align_up)
+    return reinterpret_cast<T*>(__builtin_align_up(p, granule));
+#else
+    /* XREF bits::align_up; can't use here for cyclic deps */
+    size_t align_1 = granule - 1;
+    return reinterpret_cast<T*>(
+      reinterpret_cast<uintptr_t>(pointer_offset(p, align_1)) & ~align_1);
+#endif
+  }
+
   inline size_t pointer_diff(void* base, void* cursor)
   {
     assert(cursor >= base);
