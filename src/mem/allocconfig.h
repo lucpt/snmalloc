@@ -20,6 +20,23 @@ namespace snmalloc
 #  error Need pointers in pagemap for rederivation
 #endif
 
+#ifndef SNMALLOC_CHERI_SETBOUNDS
+#  define SNMALLOC_CHERI_SETBOUNDS 0
+#endif
+
+#if SNMALLOC_CHERI_SETBOUNDS == 1
+#  if SNMALLOC_PAGEMAP_REDERIVE == 0
+#    error Must rederive pointers if setting bounds
+#  endif
+#  ifndef __CHERI__
+#    error Unable to set bounds without CHERI
+#  endif
+#endif
+
+#if (SNMALLOC_CHERI_SETBOUNDS == 1) && (SNMALLOC_CHERI_ALIGN == 0)
+#  error CHERI cannot safely bound objects with misaligned sizes
+#endif
+
 // The CHECK_CLIENT macro is used to turn on minimal checking of the client
 // calling the API correctly.
 #if !defined(NDEBUG) && !defined(CHECK_CLIENT)

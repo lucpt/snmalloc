@@ -451,24 +451,36 @@ namespace snmalloc
 #  endif
 
       constexpr sizeclass_t sizeclass = size_to_sizeclass_const(size);
+      void* ret;
 
       stats().alloc_request(size);
 
       if constexpr (sizeclass < NUM_SMALL_CLASSES)
       {
-        return small_alloc<zero_mem, allow_reserve>(size);
+        ret = small_alloc<zero_mem, allow_reserve>(size);
       }
       else if constexpr (sizeclass < NUM_SIZECLASSES)
       {
         handle_message_queue();
         constexpr size_t rsize = sizeclass_to_size(sizeclass);
-        return medium_alloc<zero_mem, allow_reserve>(sizeclass, rsize, size);
+        ret = medium_alloc<zero_mem, allow_reserve>(sizeclass, rsize, size);
       }
       else
       {
         handle_message_queue();
-        return large_alloc<zero_mem, allow_reserve>(size);
+        ret = large_alloc<zero_mem, allow_reserve>(size);
       }
+
+#  if SNMALLOC_CHERI_SETBOUNDS == 1
+      ret = (ret == NULL) ?
+        ret :
+        cheri_andperm(
+          cheri_csetbounds(ret, size),
+          CHERI_PERMS_USERSPACE_DATA & ~CHERI_PERM_CHERIABI_VMMAP);
+#  endif
+
+      return ret;
+
 #endif
     }
 
@@ -493,6 +505,8 @@ namespace snmalloc
       size_t size = dsize;
 #  endif
 
+      void* ret;
+
       stats().alloc_request(size);
 
       // Perform the - 1 on size, so that zero wraps around and ends up on
@@ -501,10 +515,22 @@ namespace snmalloc
       {
         // Allocations smaller than the slab size are more likely. Improve
         // branch prediction by placing this case first.
-        return small_alloc<zero_mem, allow_reserve>(size);
+        ret = small_alloc<zero_mem, allow_reserve>(size);
+      }
+      else
+      {
+        ret = alloc_not_small<zero_mem, allow_reserve>(size);
       }
 
-      return alloc_not_small<zero_mem, allow_reserve>(size);
+#  if SNMALLOC_CHERI_SETBOUNDS == 1
+      ret = (ret == NULL) ?
+        ret :
+        cheri_andperm(
+          cheri_csetbounds(ret, size),
+          CHERI_PERMS_USERSPACE_DATA & ~CHERI_PERM_CHERIABI_VMMAP);
+#  endif
+
+      return ret;
     }
 
     template<ZeroMem zero_mem = NoZero, AllowReserve allow_reserve = YesReserve>
@@ -523,8 +549,10 @@ namespace snmalloc
         size_t rsize = sizeclass_to_size(sizeclass);
         return medium_alloc<zero_mem, allow_reserve>(sizeclass, rsize, size);
       }
-
-      return large_alloc<zero_mem, allow_reserve>(size);
+      else
+      {
+        return large_alloc<zero_mem, allow_reserve>(size);
+      }
 
 #endif
     }
