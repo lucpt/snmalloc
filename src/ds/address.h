@@ -1,4 +1,5 @@
 #pragma once
+#include <cassert>
 #include <cstdint>
 
 namespace snmalloc
@@ -67,5 +68,12 @@ namespace snmalloc
     return reinterpret_cast<T*>(
       reinterpret_cast<uintptr_t>(pointer_offset(p, align_1)) & ~align_1);
 #endif
+  }
+
+  inline size_t pointer_diff(void* base, void* cursor)
+  {
+    assert(cursor >= base);
+    return static_cast<size_t>(
+      static_cast<uint8_t*>(cursor) - static_cast<uint8_t*>(base));
   }
 } // namespace snmalloc

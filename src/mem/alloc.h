@@ -1175,7 +1175,7 @@ namespace snmalloc
 #ifndef NDEBUG
       if (!is_multiple_of_sizeclass(
             sizeclass_to_size(sizeclass),
-            address_cast(slab) + SUPERSLAB_SIZE - address_cast(p)))
+            pointer_diff(p, pointer_offset(slab, SUPERSLAB_SIZE))))
       {
         error("Not deallocating start of an object");
       }
