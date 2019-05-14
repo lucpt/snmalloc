@@ -736,13 +736,34 @@ namespace snmalloc
         return external_pointer<location>(p, sc, slab_end);
       }
 
-      auto ss = address_cast(super);
+      address_t ss;
 
-      while (size > 64)
+      if constexpr (1 && SNMALLOC_PAGEMAP_POINTERS)
       {
-        // This is a large alloc redirect.
-        ss = ss - (1ULL << (size - 64));
+        /*
+         * There's no reason to do anything logarithmic; we're directly
+         * storing the pointer to the start here.  Just use that.
+         */
+
+        ss = address_cast(pagemap().template getp<false>(super));
         size = pagemap().get(ss);
+      }
+      else
+      {
+        ss = address_cast(super);
+        while (size > 64)
+        {
+          // This is a large alloc redirect.
+          ss = ss - (1ULL << (size - 64));
+          size = pagemap().get(ss);
+        }
+      }
+
+      if constexpr (0 && SNMALLOC_PAGEMAP_POINTERS)
+      {
+        assert(
+          (size == 0) ||
+          (ss == address_cast(pagemap().template getp<false>(super))));
       }
 
       if (size == 0)
