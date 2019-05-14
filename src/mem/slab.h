@@ -54,6 +54,8 @@ namespace snmalloc
         uint16_t next = *static_cast<uint16_t*>(node);
         meta.head = next;
 
+        assert((head != meta.link) && (next != meta.link));
+
         p = remove_cache_friendly_offset(node, meta.sizeclass);
       }
       else
