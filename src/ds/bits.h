@@ -53,7 +53,11 @@ namespace snmalloc
       return (static_cast<T>(1)) << shift;
     }
 
+#if defined(__mips__)
+    static constexpr size_t ADDRESS_BITS = 39;
+#else
     static constexpr size_t ADDRESS_BITS = is64() ? 48 : 32;
+#endif
 
     inline size_t clz(size_t x)
     {

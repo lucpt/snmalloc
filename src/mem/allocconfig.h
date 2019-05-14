@@ -143,7 +143,11 @@ namespace snmalloc
 #endif
 
   // Minimum allocation size is space for two pointers.
+#ifdef __CHERI_PURE_CAPABILITY__
+  static constexpr size_t MIN_ALLOC_BITS = 5;
+#else
   static constexpr size_t MIN_ALLOC_BITS = bits::is64() ? 4 : 3;
+#endif
   static constexpr size_t MIN_ALLOC_SIZE = 1 << MIN_ALLOC_BITS;
 
   // Slabs are 64 KiB unless constrained to 16 KiB.
