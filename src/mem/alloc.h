@@ -310,21 +310,29 @@ namespace snmalloc
 
     // Allocate memory of a statically known size.
     template<
-      size_t size,
+      size_t ssize,
       ZeroMem zero_mem = NoZero,
       AllowReserve allow_reserve = YesReserve>
     SNMALLOC_FAST_PATH ALLOCATOR void* alloc()
     {
-      static_assert(size != 0, "Size must not be zero.");
+      static_assert(ssize != 0, "Size must not be zero.");
 #ifdef USE_MALLOC
       static_assert(
         allow_reserve == YesReserve,
         "When passing to malloc, cannot require NoResereve");
       if constexpr (zero_mem == NoZero)
-        return malloc(size);
+        return malloc(ssize);
       else
-        return calloc(1, size);
+        return calloc(1, ssize);
 #else
+
+#  if SNMALLOC_CHERI_ALIGN == 1
+      constexpr size_t size =
+        bits::align_up_const(ssize, 1 << CHERI_ALIGN_SHIFT(ssize));
+#  else
+      constexpr size_t size = ssize;
+#  endif
+
       constexpr sizeclass_t sizeclass = size_to_sizeclass_const(size);
 
       stats().alloc_request(size);
@@ -349,17 +357,25 @@ namespace snmalloc
 
     // Allocate memory of a dynamically known size.
     template<ZeroMem zero_mem = NoZero, AllowReserve allow_reserve = YesReserve>
-    SNMALLOC_FAST_PATH ALLOCATOR void* alloc(size_t size)
+    SNMALLOC_FAST_PATH ALLOCATOR void* alloc(size_t dsize)
     {
 #ifdef USE_MALLOC
       static_assert(
         allow_reserve == YesReserve,
         "When passing to malloc, cannot require NoResereve");
       if constexpr (zero_mem == NoZero)
-        return malloc(size);
+        return malloc(dsize);
       else
-        return calloc(1, size);
+        return calloc(1, dsize);
 #else
+
+#  if SNMALLOC_CHERI_ALIGN == 1
+      int shift = CHERI_ALIGN_SHIFT(dsize);
+      size_t size = bits::align_up(dsize, 1 << shift);
+#  else
+      size_t size = dsize;
+#  endif
+
       stats().alloc_request(size);
 
       // Perform the - 1 on size, so that zero wraps around and ends up on

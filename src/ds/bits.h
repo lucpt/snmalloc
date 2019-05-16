@@ -240,6 +240,14 @@ namespace snmalloc
       return value;
     }
 
+    constexpr size_t align_up_const(size_t value, size_t alignment)
+    {
+      size_t align_1 = alignment - 1;
+      value += align_1;
+      value &= ~align_1;
+      return value;
+    }
+
     template<size_t alignment>
     static inline bool is_aligned_block(void* p, size_t size)
     {
