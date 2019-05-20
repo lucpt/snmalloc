@@ -367,7 +367,7 @@ namespace snmalloc
                 p, bits::align_up(size, OS_PAGE_SIZE));
           }
         }
-        if ((decommit_strategy != DecommitNone) || (large_class > 0))
+        else if ((decommit_strategy != DecommitNone) || (large_class > 0))
         {
           // The first page is already in "use" for the stack element,
           // this will need zeroing for a YesZero call.
