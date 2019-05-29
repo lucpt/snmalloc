@@ -96,7 +96,14 @@ namespace snmalloc
     }
 
     template<typename MemoryProvider>
-    bool dealloc(void* p, MemoryProvider& memory_provider)
+    void decommit(void* p, MemoryProvider& memory_provider)
+    {
+      assert(head > 0);
+      if constexpr (decommit_strategy == DecommitAll)
+        memory_provider.notify_not_using(p, sizeclass_to_size(sizeclass));
+    }
+
+    bool dealloc(void* p)
     {
       assert(head > 0);
 
@@ -104,9 +111,6 @@ namespace snmalloc
       bool was_full = full();
       free++;
       stack[--head] = pointer_to_index(p);
-
-      if constexpr (decommit_strategy == DecommitAll)
-        memory_provider.notify_not_using(p, sizeclass_to_size(sizeclass));
 
       return was_full;
     }

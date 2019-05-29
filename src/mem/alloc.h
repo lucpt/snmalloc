@@ -1577,7 +1577,8 @@ namespace snmalloc
     {
       MEASURE_TIME(medium_dealloc, 4, 16);
       stats().sizeclass_dealloc(sizeclass);
-      bool was_full = slab->dealloc(p, large_allocator.memory_provider);
+      slab->decommit(p, large_allocator.memory_provider);
+      bool was_full = slab->dealloc(p);
 
 #ifdef CHECK_CLIENT
       if (!is_multiple_of_sizeclass(
