@@ -132,6 +132,11 @@ namespace snmalloc
 
         while (alloc != nullptr)
         {
+#  if SNMALLOC_QUARANTINE_DEALLOC == 1
+          // XXX Force the allocator to consider its quarantine released
+          alloc->quarantine.debug_drain_all(alloc);
+#  endif
+
           // Destroy the message queue so that it has no stub message.
           Remote* p = alloc->message_queue().destroy();
 

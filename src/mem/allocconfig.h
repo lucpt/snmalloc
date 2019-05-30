@@ -37,6 +37,10 @@ namespace snmalloc
 #  error CHERI cannot safely bound objects with misaligned sizes
 #endif
 
+#ifndef SNMALLOC_QUARANTINE_DEALLOC
+#  define SNMALLOC_QUARANTINE_DEALLOC 0
+#endif
+
 /*
  * Deallocation routines which take a size from the caller are unsafe in
  * that they can introduce type confusion within the allocator: we could be

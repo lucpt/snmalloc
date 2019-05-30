@@ -421,6 +421,311 @@ namespace snmalloc
     LargeAlloc<MemoryProvider> large_allocator;
     PageMap page_map;
 
+#if SNMALLOC_QUARANTINE_DEALLOC == 1
+
+    /*
+     * In our design for a temporally-safe allocator, objects (more
+     * properly, virtual addresses) transition through a QUARANTINED state
+     * between ALLOCATED and FREE.  They linger here until we are sure that
+     * there are no pointers *to* them surviving outside the TCB (i.e., held
+     * by clients of the allocator; naturally, perhaps, the kernel and we
+     * both retain access to these addresses, but we trust both to not
+     * mishandle their authority).  In particular, we ensure this by
+     * forcibly removing such pointers from the system, a process we call
+     * "revocation".
+     *
+     * In CHERI, we have the ability to generate pointers which cannot
+     * reference outside an allocation (see SNMALLOC_CHERI_SETBOUNDS); we
+     * refer to these as "external" pointers and will refer to the
+     * whole-slab pointers we use internally as "high" pointers (we avoid
+     * the use of "internal", as that might mean "internal to an
+     * allocation", and of "privileged" as all pointers, in some sense, are
+     * privilege-bearing; naming is hard).  Occasionally, we have
+     * "high-external" pointers which are intermediate forms: they have the
+     * privileges of high pointers but bounds of an allocation.
+     *
+     * These two aspects interact in quarantining memory:
+     *
+     *   dealloc() now transitions memory from ALLOCATED to QUARANTINED.  It
+     *   takes an "external" pointer from the client and rederives a "high"
+     *   pointer to the slab/large allocation in use.  It stores this "high"
+     *   pointer to quarantine, as that will survive revocation.  There is
+     *   no need to store the object size, as it can be easily recovered
+     *   from actions already necessary after revocation.
+     *
+     *   After revocation, the "high" pointers of quarantine are fed to the
+     *   dealloc_real() function.
+     *
+     *   This separation unfortunately means that static size information is
+     *   of little use to dealloc().  We preserve the increasingly-static
+     *   dealloc_real() functions for comparison, but they will not be
+     *   called if a quarantine is in use.
+     */
+
+    /*
+     * A piece of the quarantine region for this allocator.  Objects in
+     * quarantine have had their revocation requested but are waiting
+     * for notification that this has happened.
+     *
+     * A quarantine node undergoes the following lifecycle:
+     *
+     *   FILLING: free()'d objects are written here while there is room.
+     *
+     *   FULL: The revocation epoch has been measured and this has been
+     *         threaded onto the linked list of waiting nodes.  This list
+     *         is used as a queue, with older entries are at the front, so
+     *         that the allocator can quickly find the collection of nodes
+     *         that can advance to FREE.
+     *
+     *   FREE: Sufficient revocation epochs have passed that this node
+     *         can be freed back to general circulation.
+     *
+     * XXX What do we do about epoch rollover?  It'd be really nice if we
+     * could force other threads to advance, somehow... can we take a
+     * lightweight mutex on entry, maybe?  (We might need such a thing to
+     * properly defend against untrusted code anyway??)
+     *
+     * XXX Right now, we're using the quarantine as double-free protection,
+     * because that was the least invasive change.  There are other schemes
+     * with deeper quarantine that could be used instead, but they have
+     * additional subtlety and/or complexity.  (If one is naive about
+     * quarantine, double-free is especially insidious: it's possible to put
+     * something into quarantine in two epochs, such that an earlier epoch
+     * causes the shoot-down of the re-allocated object in a later epoch!
+     * That seems messy and worth commenting on in the paper!)
+     *
+     */
+    struct QuarantineNode
+    {
+      /* DLL of this Allocator's FULL quarantine nodes */
+      QuarantineNode* prev;
+      QuarantineNode* next;
+
+      uint64_t full_epoch; /* When did this fill? */
+      size_t footprint; /* How many bytes of the heap do we represent? */
+      uint16_t n_ents; /* How many pointers are there in this node? */
+      uint16_t first_ent; /* How full did we get?  0: completely */
+
+      /* XXX There's 4 bytes of padding here */
+
+      /*
+       * A QuarantineNode is followed by n_ents struct QuarantineEntry-s.
+       * We omit the field here and just access past the end of this
+       * structure.
+       */
+    };
+
+    struct QuarantineEntry
+    {
+      void* privp; /* Internal pointer to object, with slab permissions */
+    };
+
+    class QuarantineState
+    {
+      DLList<struct QuarantineNode> waiting;
+      struct QuarantineNode* filling;
+      uint16_t filling_left;
+      uint8_t n_waiting;
+
+      static struct QuarantineNode* newqn(Allocator* a, uint8_t sc)
+      {
+        struct QuarantineNode* qn;
+        size_t size = sizeclass_to_size(sc);
+
+        qn = static_cast<struct QuarantineNode*>(
+          a->medium_alloc<YesZero, YesReserve>(sc, size, size));
+
+#  if defined(__CHERI_PURE_CAPABILITY__) && (SNMALLOC_PAGEMAP_REDERIVE == 1)
+        qn = static_cast<struct QuarantineNode*>(cheri_csetbounds(qn, size));
+#  endif
+
+        if (qn != nullptr)
+        {
+          qn->n_ents = (sizeclass_to_size(sc) - sizeof(struct QuarantineNode)) /
+            sizeof(struct QuarantineEntry);
+          qn->full_epoch = UINT64_MAX;
+        }
+
+        return qn;
+      }
+
+      static void
+      deqqn(Allocator* a, struct QuarantineNode* qn, uint16_t initpos)
+      {
+        uint16_t qix = initpos;
+        struct QuarantineEntry* q = reinterpret_cast<struct QuarantineEntry*>(
+          pointer_offset(qn, sizeof(struct QuarantineNode)));
+
+        q = pointer_offset(q, initpos * sizeof(struct QuarantineEntry));
+
+        for (; qix < qn->n_ents; qix++, q++)
+        {
+          void* privp = q->privp;
+          q->privp = nullptr;
+
+#  if defined(__CHERI_PURE_CAPABILITY__)
+          assert(cheri_gettag(privp));
+#  endif
+
+          a->dealloc_real(privp);
+        }
+      }
+
+      static bool epoch_clears(uint64_t now, uint64_t test)
+      {
+        (void)now;
+        (void)test;
+        return 1;
+      }
+
+      /*
+       * Given the current epoch clock, pull off sufficiently old quarantine
+       * nodes and push all the pointers therein back to free.
+       */
+      void drain(Allocator* a, uint64_t epoch)
+      {
+        struct QuarantineNode* qn = waiting.get_head();
+        while ((qn != nullptr) && epoch_clears(epoch, qn->full_epoch))
+        {
+          deqqn(a, qn, qn->first_ent);
+
+          waiting.pop();
+          n_waiting--;
+          struct QuarantineNode* qnext = waiting.get_head();
+
+          if (filling == nullptr)
+          {
+            qn->prev = nullptr;
+            qn->next = nullptr;
+            qn->full_epoch = 0;
+            qn->footprint = 0;
+            filling = qn;
+            filling_left = filling->n_ents;
+          }
+          else
+          {
+#  if defined(__CHERI_PURE_CAPABILITY__) && (SNMALLOC_PAGEMAP_REDERIVE == 1)
+            qn = static_cast<struct QuarantineNode*>(a->pagemap().getp(qn));
+#  endif
+            a->dealloc_real(qn);
+          }
+
+          qn = qnext;
+        }
+      }
+
+      /*
+       * Alright, we tried, but we are facing pressure; finish the
+       * epoch of our oldest waiting node.
+       */
+      void quarantine_step_drain(Allocator* a, const char* cause)
+      {
+        uint64_t epoch;
+
+        (void)cause;
+        epoch = 4;
+
+        assert(n_waiting > 0);
+        drain(a, epoch);
+      }
+
+      void quarantine_step(Allocator* a)
+      {
+        uint64_t epoch;
+
+        epoch = 4;
+
+        filling->first_ent = filling_left;
+        waiting.insert_back(filling);
+        filling = nullptr;
+        n_waiting++;
+
+        if ((filling == nullptr) && (n_waiting > 1)) // XXX n_waiting vs. ?
+        {
+          quarantine_step_drain(a, "full");
+        }
+        else
+        {
+          QuarantineNode* qn = newqn(a, NUM_SMALL_CLASSES);
+          if (qn == nullptr)
+          {
+            quarantine_step_drain(a, "noqn");
+          }
+          else
+          {
+            filling = qn;
+            filling_left = qn->n_ents;
+          }
+        }
+
+        assert(filling != nullptr);
+      }
+
+    public:
+      void init(Allocator* a)
+      {
+        n_waiting = 0;
+
+        filling = newqn(a, NUM_SMALL_CLASSES);
+        assert(filling != nullptr);
+
+        filling_left = filling->n_ents;
+      }
+
+      void quarantine(Allocator* a, void* privp, size_t psize)
+      {
+        struct QuarantineEntry* q = reinterpret_cast<struct QuarantineEntry*>(
+          pointer_offset(filling, sizeof(struct QuarantineNode)));
+
+        filling_left--;
+        q[filling_left].privp = privp;
+
+        filling->footprint += psize;
+
+        if (filling_left == 0)
+        {
+          quarantine_step(a);
+        }
+      }
+
+      /*
+       * Like drain(), but unconditional on epoch and also all the pointers
+       * from the filling qn.
+       *
+       * Like it says on the tin, only for debugging use.
+       */
+      void debug_drain_all(Allocator* a)
+      {
+        struct QuarantineNode* qn = waiting.get_head();
+
+        while (qn != nullptr)
+        {
+          waiting.pop();
+          n_waiting--;
+          struct QuarantineNode* qnext = waiting.get_head();
+
+          deqqn(a, qn, qn->first_ent);
+
+#  if defined(__CHERI_PURE_CAPABILITY__) && (SNMALLOC_PAGEMAP_REDERIVE == 1)
+          qn = static_cast<struct QuarantineNode*>(a->pagemap().getp(qn));
+#  endif
+          a->dealloc_real(qn);
+
+          qn = qnext;
+        }
+        assert(n_waiting == 0);
+
+        if (filling_left != filling->n_ents)
+        {
+          deqqn(a, filling, filling_left);
+          filling_left = filling->n_ents;
+        }
+      }
+    };
+
+    QuarantineState quarantine;
+#endif
+
   public:
     Stats& stats()
     {
@@ -620,7 +925,11 @@ namespace snmalloc
         privp = page_map.getp(p);
       }
 
+#    if SNMALLOC_QUARANTINE_DEALLOC == 1
+      quarantine.quarantine(this, privp, size);
+#    else
       dealloc_real<size>(privp);
+#    endif
 #  endif
     }
 
@@ -681,7 +990,12 @@ namespace snmalloc
         privp = page_map.getp(p);
       }
 
+#    if SNMALLOC_QUARANTINE_DEALLOC == 1
+      quarantine.quarantine(this, privp, size);
+#    else
       dealloc_real(privp, size);
+#    endif
+
 #  endif
     }
 
@@ -760,7 +1074,34 @@ namespace snmalloc
         privp = page_map.getp(p);
       }
 
+#  if SNMALLOC_QUARANTINE_DEALLOC == 1
+      size_t size;
+      uint8_t pmsc = pagemap().get(address_cast(privp));
+      if (pmsc == PMNotOurs)
+      {
+        error("Not allocated by this allocator");
+      }
+
+      if (pmsc == PMSuperslab)
+      {
+        Superslab* super = Superslab::get(privp);
+        size = sizeclass_to_size(super->get_meta(Slab::get(privp)).sizeclass);
+      }
+      else if (pmsc == PMMediumslab)
+      {
+        Mediumslab* slab = Mediumslab::get(privp);
+        size = sizeclass_to_size(slab->get_sizeclass());
+      }
+      else
+      {
+        size = large_sizeclass_to_size(pmsc - SUPERSLAB_BITS);
+      }
+
+      quarantine.quarantine(this, privp, size);
+#  else
       dealloc_real(privp);
+#  endif
+
 #endif
     }
 
@@ -1212,6 +1553,10 @@ namespace snmalloc
 
       init_message_queue();
       message_queue().invariant();
+
+#if SNMALLOC_QUARANTINE_DEALLOC == 1
+      quarantine.init(this);
+#endif
 
 #ifndef NDEBUG
       for (sizeclass_t i = 0; i < NUM_SIZECLASSES; i++)
