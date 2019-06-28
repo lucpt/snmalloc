@@ -11,9 +11,15 @@ int main(int, char**)
 {
   bool failed = false;
   size_t size_low = 0;
+  size_t zsc = (size_t)snmalloc::size_to_sizeclass(0);
 
-  std::cout << "0 has sizeclass: " << (size_t)snmalloc::size_to_sizeclass(0)
-            << std::endl;
+  std::cout << "INTERMEDIATE: " << snmalloc::INTERMEDIATE_BITS
+            << " MIN_ALLOC: " << snmalloc::MIN_ALLOC_BITS << std::endl;
+
+  std::cout << "0 has sizeclass: " << zsc << std::endl;
+
+  std::cout << "size(sizeclass(0)) = "
+            << (size_t)snmalloc::sizeclass_to_size(zsc) << std::endl;
 
   std::cout << "sizeclass |-> [size_low, size_high] " << std::endl;
 
@@ -25,7 +31,18 @@ int main(int, char**)
 
     size_t size = snmalloc::sizeclass_to_size(sz);
     std::cout << (size_t)sz << " |-> "
-              << "[" << size_low + 1 << ", " << size << "]" << std::endl;
+              << "[" << size_low + 1 << ", " << size << "]";
+
+#ifdef __CHERI_PURE_CAPABILITY__
+    size_t cheri_low = snmalloc::bits::align_up(
+      size_low + 1, 1 << CHERI_ALIGN_SHIFT(size_low + 1));
+    size_t cheri_size =
+      snmalloc::bits::align_up(size, 1 << CHERI_ALIGN_SHIFT(size));
+    std::cout << " CHERI [" << cheri_low << ", " << cheri_size << "] "
+              << (cheri_size == size ? "ok" : "bad");
+#endif
+
+    std::cout << std::endl;
 
     if (size < size_low)
     {
