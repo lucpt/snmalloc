@@ -37,10 +37,32 @@ namespace snmalloc
 #  error CHERI cannot safely bound objects with misaligned sizes
 #endif
 
+/*
+ * Deallocation routines which take a size from the caller are unsafe in
+ * that they can introduce type confusion within the allocator: we could be
+ * convinced to treat user memory as a superslab, for example.  Set
+ * SNMALLOC_UNSAFE_FREES to 0 to stub them out and redirect them to the
+ * generic deallocation routine which just takes a pointer.  Instead, one
+ * can set SNMALLOC_UNSAFE_FREES_CHECK (with CHECK_CLIENT) to verify that
+ * the size indicated is compatible with the actual pointer size obtained by
+ * metadata lookup.
+ */
+#ifndef SNMALLOC_UNSAFE_FREES
+#  define SNMALLOC_UNSAFE_FREES 1
+#endif
+
 // The CHECK_CLIENT macro is used to turn on minimal checking of the client
 // calling the API correctly.
 #if !defined(NDEBUG) && !defined(CHECK_CLIENT)
 #  define CHECK_CLIENT
+#endif
+
+#if (SNMALLOC_UNSAFE_FREES == 1) && !defined(SNMALLOC_UNSAFE_FREES_CHECK)
+#  ifdef CHECK_CLIENT
+#    define SNMALLOC_UNSAFE_FREES_CHECK 1
+#  else
+#    define SNMALLOC_UNSAFE_FREES_CHECK 0
+#  endif
 #endif
 
   // 0 intermediate bits results in power of 2 small allocs. 1 intermediate

@@ -562,6 +562,40 @@ namespace snmalloc
 #endif
     }
 
+#if defined(CHECK_CLIENT) && (SNMALLOC_UNSAFE_FREES_CHECK == 1)
+  private:
+    void verify_size(void* p, size_t claimed)
+    {
+      void* privp = p;
+      if constexpr (SNMALLOC_PAGEMAP_REDERIVE)
+      {
+        privp = page_map.getp(p);
+      }
+
+      uint8_t pmsc = pagemap().get(address_cast(privp));
+      if (pmsc == PMSuperslab)
+      {
+        Superslab* super = Superslab::get(privp);
+        Slab* slab = Slab::get(privp);
+        Metaslab& meta = super->get_meta(slab);
+        uint8_t sc = meta.sizeclass;
+        assert(sc == size_to_sizeclass(claimed));
+      }
+      else if (pmsc == PMMediumslab)
+      {
+        Mediumslab* slab = Mediumslab::get(privp);
+        size_t sc = slab->get_sizeclass();
+        assert(sc == size_to_sizeclass(claimed));
+      }
+      else
+      {
+        assert(pmsc < 64);
+        assert(pmsc == bits::next_pow2_bits(claimed));
+      }
+    }
+#endif
+
+#if SNMALLOC_UNSAFE_FREES == 1
   public:
     /*
      * Free memory of a statically known size. Must be called with an
@@ -570,10 +604,14 @@ namespace snmalloc
     template<size_t size>
     void dealloc(void* p)
     {
-#ifdef USE_MALLOC
+#  if defined(CHECK_CLIENT) && (SNMALLOC_UNSAFE_FREES_CHECK == 1)
+      verify_size(p, size);
+#  endif
+
+#  ifdef USE_MALLOC
       UNUSED(size);
       return free(p);
-#else
+#  else
       handle_message_queue();
 
       void* privp = p;
@@ -583,7 +621,7 @@ namespace snmalloc
       }
 
       dealloc_real<size>(privp);
-#endif
+#  endif
     }
 
   private:
@@ -627,10 +665,14 @@ namespace snmalloc
      */
     void dealloc(void* p, size_t size)
     {
-#ifdef USE_MALLOC
+#  if defined(CHECK_CLIENT) && (SNMALLOC_UNSAFE_FREES_CHECK == 1)
+      verify_size(p, size);
+#  endif
+
+#  ifdef USE_MALLOC
       UNUSED(size);
       return free(p);
-#else
+#  else
       handle_message_queue();
 
       void* privp = p;
@@ -640,7 +682,7 @@ namespace snmalloc
       }
 
       dealloc_real(privp, size);
-#endif
+#  endif
     }
 
   private:
@@ -673,6 +715,33 @@ namespace snmalloc
         large_dealloc(p, size);
       }
     }
+
+#else /* SNMALLOC_UNSAFE_FREES */
+
+  public:
+    template<size_t size>
+    void dealloc(void* p)
+    {
+
+#  if defined(CHECK_CLIENT) && (SNMALLOC_UNSAFE_FREES_CHECK == 1)
+      verify_sizeclass(p, size_to_sizeclass_const(size));
+#  endif
+
+      dealloc(p);
+    }
+
+    void dealloc(void* p, size_t size)
+    {
+
+#  if defined(CHECK_CLIENT) && (SNMALLOC_UNSAFE_FREES_CHECK == 1)
+      verify_sizeclass(p, size_to_sizeclass_const(size));
+#  endif
+
+      (void)size;
+      dealloc(p);
+    }
+
+#endif /* SNMALLOC_UNSAFE_FREES */
 
   public:
     /*
