@@ -76,9 +76,14 @@ namespace snmalloc
       return sizeclass <= h;
     }
 
-    void init(RemoteAllocator* alloc)
+    void init(RemoteAllocator* alloc, uint8_t* rbm)
     {
       allocator = alloc;
+#if SNMALLOC_REVOKE_QUARANTINE == 1
+      revbitmap = rbm;
+#else
+      (void)rbm;
+#endif
 
       if (kind != Super)
       {

@@ -44,12 +44,18 @@ namespace snmalloc
       return pointer_align_down<SUPERSLAB_SIZE, Mediumslab>(p);
     }
 
-    void init(RemoteAllocator* alloc, sizeclass_t sc, size_t rsize)
+    void
+    init(RemoteAllocator* alloc, uint8_t* rbm, sizeclass_t sc, size_t rsize)
     {
       assert(sc >= NUM_SMALL_CLASSES);
       assert((sc - NUM_SMALL_CLASSES) < NUM_MEDIUM_CLASSES);
 
       allocator = alloc;
+#if SNMALLOC_REVOKE_QUARANTINE == 1
+      revbitmap = rbm;
+#else
+      (void)rbm;
+#endif
       head = 0;
 
       // If this was previously a Mediumslab of the same sizeclass, don't

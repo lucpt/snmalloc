@@ -1720,7 +1720,9 @@ namespace snmalloc
       if ((allow_reserve == NoReserve) && (super == nullptr))
         return super;
 
-      super->init(public_state());
+      uint8_t* revbitmap = nullptr;
+
+      super->init(public_state(), revbitmap);
       pagemap().set_slab(super);
       super_available.insert(super);
       return super;
@@ -2003,7 +2005,9 @@ namespace snmalloc
         if ((allow_reserve == NoReserve) && (slab == nullptr))
           return nullptr;
 
-        slab->init(public_state(), sizeclass, rsize);
+        uint8_t* revbitmap = nullptr;
+
+        slab->init(public_state(), revbitmap, sizeclass, rsize);
         pagemap().set_slab(slab);
         p = slab->alloc<zero_mem>(size, large_allocator.memory_provider);
 
