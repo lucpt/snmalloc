@@ -219,7 +219,12 @@ namespace snmalloc
           PagemapProvider::pagemap().get(address_cast(p)));
         if constexpr (offset)
         {
-          return (void*)(pointer_offset(pmp, pointer_diff(pmp, p)));
+#if defined(__CHERI__)
+          size_t delta = pointer_diff_without_provenance(pmp, p);
+#else
+          size_t delta = pointer_diff(pmp, p);
+#endif
+          return (void*)(pointer_offset(pmp, delta));
         }
         else
         {
@@ -738,15 +743,40 @@ namespace snmalloc
 #else
       uint8_t size = pagemap().get(address_cast(p));
 
+      void* privp = p;
       if constexpr (SNMALLOC_PAGEMAP_REDERIVE)
       {
-        p = page_map.getp(p);
+        privp = page_map.getp(p);
       }
 
-      Superslab* super = Superslab::get(p);
+#  if defined(__CHERI__)
+      /*
+       * It is possible that the user-provided capability p is untagged; it
+       * might, for example, have been revoked.  If that's true now, bail
+       * out.  Otherwise, it's possible that p might become revoked while
+       * we're working, but we work with privp when accessing internal
+       * structures and tread carefully, ensuring that our answer is in
+       * terms of the original p, thereby preventing aliasing due to races
+       * with this function.  It's possible that we will reveal something
+       * about our internal state, but no user data and no capabilities
+       * will flow to the caller.
+       *
+       * We might data-race with another thread here if p is freed during
+       * operation, but nothing that thread does should cause us to fault;
+       * the headers we're after are in the first page of a superslab,
+       * which are never decommitted.
+       */
+
+      if (!cheri_gettag(p))
+      {
+        return address_cast(static_cast<void*>(nullptr));
+      }
+#  endif
+
+      Superslab* super = Superslab::get(privp);
       if (size == PMSuperslab)
       {
-        Slab* slab = Slab::get(p);
+        Slab* slab = Slab::get(privp);
         Metaslab& meta = super->get_meta(slab);
 
         sizeclass_t sc = meta.sizeclass;
@@ -756,7 +786,7 @@ namespace snmalloc
       }
       if (size == PMMediumslab)
       {
-        Mediumslab* slab = Mediumslab::get(p);
+        Mediumslab* slab = Mediumslab::get(privp);
 
         sizeclass_t sc = slab->get_sizeclass();
         void* slab_end = pointer_offset(slab, SUPERSLAB_SIZE);
@@ -803,6 +833,10 @@ namespace snmalloc
           // We don't know the Start, so return MIN_PTR
           return 0;
       }
+
+#  if defined(__CHERI__)
+      ss = address_cast(cheri_setaddress(p, ss));
+#  endif
 
       // This is a large alloc, mask off to the slab size.
       if constexpr (location == Start)
@@ -1122,8 +1156,17 @@ namespace snmalloc
       size_t end_to_end =
         round_by_sizeclass(rsize, static_cast<size_t>(offset_from_end));
 
-      return address_cast<uint8_t>(
-        static_cast<uint8_t*>(end_point_correction) - end_to_end);
+      uint8_t* priv_res =
+        static_cast<uint8_t*>(end_point_correction) - end_to_end;
+
+#if defined(__CHERI__)
+      uint8_t* res =
+        static_cast<uint8_t*>(cheri_setaddress(p, cheri_getaddress(priv_res)));
+#else
+      uint8_t* res = priv_res;
+#endif
+
+      return address_cast<uint8_t>(res);
     }
 
     void init_message_queue()

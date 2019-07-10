@@ -99,4 +99,15 @@ namespace snmalloc
     return static_cast<size_t>(
       static_cast<uint8_t*>(cursor) - static_cast<uint8_t*>(base));
   }
+
+#if defined(__CHERI_PURE_CAPABILITY__)
+  inline size_t pointer_diff_without_provenance(void* base, void* cursor)
+  {
+    vaddr_t vb = reinterpret_cast<vaddr_t>(base);
+    vaddr_t vc = reinterpret_cast<vaddr_t>(cursor);
+    assert(vc >= vb);
+    return static_cast<size_t>(vc - vb);
+  }
+#endif
+
 } // namespace snmalloc
