@@ -1130,7 +1130,14 @@ namespace snmalloc
     {
       // Manufacture an allocation to prime the queue
       // Using an actual allocation removes a conditional of a critical path.
-      Remote* dummy = reinterpret_cast<Remote*>(alloc<YesZero>(MIN_ALLOC_SIZE));
+      //
+      // Bypass the alloc() wrapper and go straight for the internal
+      // small_alloc() so that CHERI bounds are not set on the resulting
+      // internal object, so that it is suitable to be passed directly to
+      // the internal deallocation routines which expect to be able to align
+      // to find Superslab headers.
+      Remote* dummy = reinterpret_cast<Remote*>(
+        small_alloc<YesZero, YesReserve>(MIN_ALLOC_SIZE));
       dummy->set_target_id(id());
       message_queue().init(dummy);
     }
