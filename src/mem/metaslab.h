@@ -101,7 +101,7 @@ namespace snmalloc
     /// simple corruptions.
     static SNMALLOC_FAST_PATH void store_next(void* p, void* head)
     {
-#ifndef CHECK_CLIENT
+#if !defined(CHECK_CLIENT) || defined(__CHERI_PURE_CAPABILITY__)
       *static_cast<void**>(p) = head;
 #else
       *static_cast<void**>(p) = head;
@@ -113,7 +113,7 @@ namespace snmalloc
     /// In Debug checks for simple corruptions.
     static SNMALLOC_FAST_PATH void* follow_next(void* node)
     {
-#ifdef CHECK_CLIENT
+#if defined(CHECK_CLIENT) && !defined(__CHERI_PURE_CAPABILITY__)
       uintptr_t next = *static_cast<uintptr_t*>(node);
       uintptr_t chk = *(static_cast<uintptr_t*>(node) + 1);
       if ((next ^ chk) != POISON)
