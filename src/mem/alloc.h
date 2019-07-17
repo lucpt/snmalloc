@@ -538,6 +538,9 @@ namespace snmalloc
         uint8_t* revbitmap; /* Direct access to large object's shadow */
         uint8_t pmsc; /* Page map size class */
       } addl;
+#    if (SNMALLOC_REVOKE_PARANOIA == 1)
+      void* origp;
+#    endif
 #  endif
     };
 
@@ -621,6 +624,11 @@ namespace snmalloc
           }
 
           caprev_shadow_nomap_clear(reinterpret_cast<uint64_t*>(revbitmap), p);
+
+#    if SNMALLOC_REVOKE_PARANOIA == 1
+          /* Verify that the original pointer has had its tag cleared */
+          assert(!cheri_gettag(q->origp));
+#    endif
 
 #  endif
 
@@ -823,6 +831,9 @@ namespace snmalloc
           q[filling_left].addl.revbitmap = revbitmap;
           q[filling_left].privp = privpred;
         }
+#    if (SNMALLOC_REVOKE_PARANOIA == 1)
+        q[filling_left].origp = p;
+#    endif
 #  else
         q[filling_left].privp = privp;
 #  endif
