@@ -16,6 +16,18 @@
 #include "sizeclasstable.h"
 #include "slab.h"
 
+#if SNMALLOC_REVOKE_QUARANTINE == 1
+extern "C"
+{
+#  if defined(__CHERI__)
+#    include <cheri/cheric.h>
+#  endif
+#  include <cheri/caprevoke.h>
+#  include <inttypes.h>
+#  include <sys/caprevoke.h>
+}
+#endif
+
 namespace snmalloc
 {
   enum Boundary
@@ -483,7 +495,9 @@ namespace snmalloc
      * XXX What do we do about epoch rollover?  It'd be really nice if we
      * could force other threads to advance, somehow... can we take a
      * lightweight mutex on entry, maybe?  (We might need such a thing to
-     * properly defend against untrusted code anyway??)
+     * properly defend against untrusted code anyway??)  A better idea would
+     * be to use a capability itself to mark that an epoch had definitely
+     * passed.  That seems like a post-ASPLOS idea.
      *
      * XXX Right now, we're using the quarantine as double-free protection,
      * because that was the least invasive change.  There are other schemes
@@ -518,6 +532,13 @@ namespace snmalloc
     struct QuarantineEntry
     {
       void* privp; /* Internal pointer to object, with slab permissions */
+#  if (SNMALLOC_REVOKE_QUARANTINE == 1)
+      union
+      {
+        uint8_t* revbitmap; /* Direct access to large object's shadow */
+        uint8_t pmsc; /* Page map size class */
+      } addl;
+#  endif
     };
 
     class QuarantineState
@@ -567,15 +588,55 @@ namespace snmalloc
           assert(cheri_gettag(privp));
 #  endif
 
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
+
+          uint8_t* revbitmap;
+          void* p;
+
+          if (cheri_gettag(q->addl.revbitmap))
+          {
+            /*
+             * This is a large object and we have been handed its shadow
+             * bitmap access.  privp can be used directly, as its bounds are
+             * precisely those of the large object.
+             */
+            revbitmap = q->addl.revbitmap;
+            p = privp;
+          }
+          else if (q->addl.pmsc == PMSuperslab)
+          {
+            Superslab* super = Superslab::get(privp);
+            revbitmap = super->get_revbitmap();
+            p = cheri_csetbounds(
+              privp,
+              sizeclass_to_size(super->get_meta(Slab::get(privp)).sizeclass));
+          }
+          else
+          {
+            assert(q->addl.pmsc == PMMediumslab);
+            Mediumslab* slab = Mediumslab::get(privp);
+            revbitmap = slab->get_revbitmap();
+            p =
+              cheri_csetbounds(privp, sizeclass_to_size(slab->get_sizeclass()));
+          }
+
+          caprev_shadow_nomap_clear(reinterpret_cast<uint64_t*>(revbitmap), p);
+
+#  endif
+
           a->dealloc_real(privp);
         }
       }
 
       static bool epoch_clears(uint64_t now, uint64_t test)
       {
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
+        return caprevoke_epoch_clears(now, test);
+#  else
         (void)now;
         (void)test;
         return 1;
+#  endif
       }
 
       /*
@@ -623,8 +684,19 @@ namespace snmalloc
         uint64_t epoch;
 
         (void)cause;
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
+        struct caprevoke_stats crst;
+        QuarantineNode* qn = waiting.get_head();
+        do
+        {
+          int res = caprevoke(CAPREVOKE_LAST_PASS, qn->full_epoch, &crst);
+          UNUSED(res);
+          assert(res == 0);
+        } while (!epoch_clears(crst.epoch_fini, qn->full_epoch));
+        epoch = crst.epoch_fini;
+#  else
         epoch = 4;
-
+#  endif
         assert(n_waiting > 0);
         drain(a, epoch);
       }
@@ -633,12 +705,34 @@ namespace snmalloc
       {
         uint64_t epoch;
 
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
+        {
+          struct caprevoke_stats crst;
+          int res = caprevoke(
+            CAPREVOKE_IGNORE_START | CAPREVOKE_ONLY_IF_OPEN, 0, &crst);
+          UNUSED(res);
+          assert(res == 0);
+          filling->full_epoch = crst.epoch_init;
+          epoch = crst.epoch_fini;
+        }
+#  else
         epoch = 4;
+#  endif
 
         filling->first_ent = filling_left;
         waiting.insert_back(filling);
         filling = nullptr;
         n_waiting++;
+
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
+        /*
+         * This one might be a no-op, if no nodes are sufficiently old.
+         * Do this only if we are revoking, so that we exercise the
+         * multiple node paths on non-revoking platforms.
+         */
+
+        drain(a, epoch);
+#  endif
 
         if ((filling == nullptr) && (n_waiting > 1)) // XXX n_waiting vs. ?
         {
@@ -672,13 +766,66 @@ namespace snmalloc
         filling_left = filling->n_ents;
       }
 
-      void quarantine(Allocator* a, void* privp, size_t psize)
+      void quarantine(
+        Allocator* a,
+        uint8_t* revbitmap,
+        void* privp,
+        void* privpred,
+        void* p,
+        size_t psize,
+        uint8_t pmsc)
       {
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
+        assert(revbitmap != nullptr);
+        /*
+         * Paint the revocation bitmap using the external pointer so that we
+         * correctly fence against concurrent double-free and frees from
+         * earlier revocation epochs.
+         */
+        if (
+          caprev_shadow_nomap_set(
+            reinterpret_cast<uint64_t*>(revbitmap), privpred, p) != 0)
+        {
+          return;
+        }
+#  else
+        UNUSED(revbitmap);
+        UNUSED(privpred);
+        UNUSED(p);
+        UNUSED(privp);
+        UNUSED(pmsc);
+#  endif
+
         struct QuarantineEntry* q = reinterpret_cast<struct QuarantineEntry*>(
           pointer_offset(filling, sizeof(struct QuarantineNode)));
 
         filling_left--;
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
+        if ((pmsc == PMSuperslab) || (pmsc == PMMediumslab))
+        {
+          /*
+           * Small objects store their pmsc to avoid another lookup and
+           * a sufficiently privileged pointer that we can get back to
+           * the containing slab's headers.
+           */
+          q[filling_left].addl.pmsc = pmsc;
+          q[filling_left].privp = privp;
+        }
+        else
+        {
+          /*
+           * Large objects store their revocation shadow capability directly
+           * and the reduced-bounds privileged pointer which encapsulates
+           * the entire object.  There is no need to reach outside this
+           * region going forward: snmalloc does not coalesce large objects
+           * nor manage them in aggregation.
+           */
+          q[filling_left].addl.revbitmap = revbitmap;
+          q[filling_left].privp = privpred;
+        }
+#  else
         q[filling_left].privp = privp;
+#  endif
 
         filling->footprint += psize;
 
@@ -698,11 +845,36 @@ namespace snmalloc
       {
         struct QuarantineNode* qn = waiting.get_head();
 
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
+        struct caprevoke_stats crst;
+        bool did_revoke = false;
+
+        int res = caprevoke(
+          CAPREVOKE_NO_WAIT_OK | CAPREVOKE_IGNORE_START |
+            CAPREVOKE_LAST_NO_EARLY,
+          0,
+          &crst);
+        UNUSED(res);
+        assert(res == 0);
+        uint64_t start_epoch = crst.epoch_init;
+#  endif
+
+        /* Drain queue, forcing revocations as we go */
         while (qn != nullptr)
         {
           waiting.pop();
           n_waiting--;
           struct QuarantineNode* qnext = waiting.get_head();
+
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
+          while (!epoch_clears(crst.epoch_fini, qn->full_epoch))
+          {
+            int res = caprevoke(CAPREVOKE_LAST_PASS, qn->full_epoch, &crst);
+            UNUSED(res);
+            assert(res == 0);
+            did_revoke = true;
+          }
+#  endif
 
           deqqn(a, qn, qn->first_ent);
 
@@ -717,6 +889,16 @@ namespace snmalloc
 
         if (filling_left != filling->n_ents)
         {
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
+          while (!did_revoke && !epoch_clears(crst.epoch_fini, start_epoch))
+          {
+            int res = caprevoke(
+              CAPREVOKE_LAST_PASS | CAPREVOKE_IGNORE_START, start_epoch, &crst);
+            UNUSED(res);
+            assert(res == 0);
+          }
+#  endif
+
           deqqn(a, filling, filling_left);
           filling_left = filling->n_ents;
         }
@@ -926,7 +1108,40 @@ namespace snmalloc
       }
 
 #    if SNMALLOC_QUARANTINE_DEALLOC == 1
-      quarantine.quarantine(this, privp, size);
+
+#      if SNMALLOC_REVOKE_QUARANTINE == 1
+      uint8_t pmsc;
+      constexpr uint8_t sizeclass = size_to_sizeclass_const(size);
+      uint8_t* revbitmap = nullptr;
+      if constexpr (sizeclass < NUM_SMALL_CLASSES)
+      {
+        Superslab* super = Superslab::get(privp);
+        revbitmap = super->get_revbitmap();
+        pmsc = PMSuperslab;
+      }
+      else if constexpr (sizeclass < NUM_SIZECLASSES)
+      {
+        Mediumslab* slab = Mediumslab::get(privp);
+        revbitmap = slab->get_revbitmap();
+        pmsc = PMMediumslab;
+      }
+      else
+      {
+        // XXX System call!  Would rather fuse into madvise(), if possible.
+        int res = caprevoke_shadow(
+          CAPREVOKE_SHADOW_NOVMMAP,
+          privp,
+          reinterpret_cast<void**>(&revbitmap));
+        (void)res; /* quiet NDEBUG builds */
+        assert(res == 0);
+        pmsc = SUPERSLAB_BITS;
+      }
+      void* privpred = cheri_csetbounds(privp, size);
+      quarantine.quarantine(this, revbitmap, privp, privpred, p, size, pmsc);
+#      else
+      quarantine.quarantine(this, NULL, privp, NULL, p, size, 0);
+#      endif
+
 #    else
       dealloc_real<size>(privp);
 #    endif
@@ -937,6 +1152,8 @@ namespace snmalloc
     template<size_t size>
     void dealloc_real(void* p)
     {
+      // p is a "high" pointer, not "external"; xref predealloc
+
       constexpr sizeclass_t sizeclass = size_to_sizeclass_const(size);
 
       handle_message_queue();
@@ -991,11 +1208,45 @@ namespace snmalloc
       }
 
 #    if SNMALLOC_QUARANTINE_DEALLOC == 1
-      quarantine.quarantine(this, privp, size);
+
+#      if SNMALLOC_REVOKE_QUARANTINE == 1
+      uint8_t sizeclass = size_to_sizeclass(size);
+      uint8_t* revbitmap = nullptr;
+      uint8_t pmsc;
+
+      if (sizeclass < NUM_SMALL_CLASSES)
+      {
+        Superslab* super = Superslab::get(privp);
+        revbitmap = super->get_revbitmap();
+        pmsc = PMSuperslab;
+      }
+      else if (sizeclass < NUM_SIZECLASSES)
+      {
+        Mediumslab* slab = Mediumslab::get(privp);
+        revbitmap = slab->get_revbitmap();
+        pmsc = PMMediumslab;
+      }
+      else
+      {
+        // XXX System call!  Would rather fuse into madvise(), if possible.
+        int res = caprevoke_shadow(
+          CAPREVOKE_SHADOW_NOVMMAP,
+          privp,
+          reinterpret_cast<void**>(&revbitmap));
+        (void)res; /* quiet NDEBUG builds */
+        assert(res == 0);
+        pmsc = SUPERSLAB_BITS;
+      }
+
+      void* privpred = cheri_csetbounds(privp, size);
+      quarantine.quarantine(this, revbitmap, privp, privpred, p, size, pmsc);
+#      else
+      quarantine.quarantine(this, NULL, privp, NULL, p, size, 0);
+#      endif
+
 #    else
       dealloc_real(privp, size);
 #    endif
-
 #  endif
     }
 
@@ -1082,26 +1333,50 @@ namespace snmalloc
         error("Not allocated by this allocator");
       }
 
+#    if SNMALLOC_REVOKE_QUARANTINE == 1
+      uint8_t* revbitmap = nullptr;
+#    endif
+
       if (pmsc == PMSuperslab)
       {
         Superslab* super = Superslab::get(privp);
         size = sizeclass_to_size(super->get_meta(Slab::get(privp)).sizeclass);
+#    if SNMALLOC_REVOKE_QUARANTINE == 1
+        revbitmap = super->get_revbitmap();
+#    endif
       }
       else if (pmsc == PMMediumslab)
       {
         Mediumslab* slab = Mediumslab::get(privp);
         size = sizeclass_to_size(slab->get_sizeclass());
+#    if SNMALLOC_REVOKE_QUARANTINE == 1
+        revbitmap = slab->get_revbitmap();
+#    endif
       }
       else
       {
         size = large_sizeclass_to_size(pmsc - SUPERSLAB_BITS);
+#    if SNMALLOC_REVOKE_QUARANTINE == 1
+        // XXX System call!  Would rather fuse into madvise(), if possible.
+        int res = caprevoke_shadow(
+          CAPREVOKE_SHADOW_NOVMMAP,
+          privp,
+          reinterpret_cast<void**>(&revbitmap));
+        (void)res; /* quiet NDEBUG builds */
+        assert(res == 0);
+#    endif
       }
 
-      quarantine.quarantine(this, privp, size);
+#    if SNMALLOC_REVOKE_QUARANTINE == 1
+      void* privpred = cheri_csetbounds(privp, size);
+      quarantine.quarantine(this, revbitmap, privp, privpred, p, size, pmsc);
+#    else
+      quarantine.quarantine(this, NULL, privp, NULL, p, size, 0);
+#    endif
+
 #  else
       dealloc_real(privp);
 #  endif
-
 #endif
     }
 
@@ -1721,6 +1996,12 @@ namespace snmalloc
         return super;
 
       uint8_t* revbitmap = nullptr;
+#if SNMALLOC_REVOKE_QUARANTINE == 1
+      int res = caprevoke_shadow(
+        CAPREVOKE_SHADOW_NOVMMAP, super, reinterpret_cast<void**>(&revbitmap));
+      (void)res; /* quiet NDEBUG builds */
+      assert(res == 0);
+#endif
 
       super->init(public_state(), revbitmap);
       pagemap().set_slab(super);
@@ -2006,6 +2287,12 @@ namespace snmalloc
           return nullptr;
 
         uint8_t* revbitmap = nullptr;
+#if SNMALLOC_REVOKE_QUARANTINE == 1
+        int res = caprevoke_shadow(
+          CAPREVOKE_SHADOW_NOVMMAP, slab, reinterpret_cast<void**>(&revbitmap));
+        (void)res; /* quiet NDEBUG builds */
+        assert(res == 0);
+#endif
 
         slab->init(public_state(), revbitmap, sizeclass, rsize);
         pagemap().set_slab(slab);
