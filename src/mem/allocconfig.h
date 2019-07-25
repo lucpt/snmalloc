@@ -55,6 +55,12 @@ namespace snmalloc
 #    define SNMALLOC_REVOKE_CHATTY 0
 #  endif
 
+#  ifndef SNMALLOC_REVOKE_DRY_RUN
+#    define SNMALLOC_REVOKE_DRY_RUN 0
+#  elif (SNMALLOC_REVOKE_PARANOIA == 1) && (SNMALLOC_REVOKE_DRY_RUN == 1)
+#    error Doing nothing while being paranoid will not work out well.
+#  endif
+
 #  if SNMALLOC_QUARANTINE_DEALLOC == 0
 #    error Revocation depends upon quarantine.
 #  endif
