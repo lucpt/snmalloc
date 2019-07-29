@@ -6,6 +6,10 @@ option(USE_MEASURE "Measure performance with histograms" OFF)
 option(EXPOSE_EXTERNAL_PAGEMAP "Expose the global pagemap" OFF)
 option(EXPOSE_EXTERNAL_RESERVE "Expose an interface to reserve memory using the default memory provider" OFF)
 
+
+# CHERI revocation options:
+option(USE_REVOCATION "Support for revocation" OFF)
+
 set(CACHE_FRIENDLY_OFFSET OFF CACHE STRING "Base offset to place linked-list nodes.")
 
 # Provide as macro so other projects can reuse
@@ -140,6 +144,11 @@ if(NOT DEFINED SNMALLOC_ONLY_HEADER_LIBRARY)
     target_compile_definitions(${name} PRIVATE "SNMALLOC_EXPORT=__attribute__((visibility(\"default\")))")
     set_target_properties(${name} PROPERTIES CXX_VISIBILITY_PRESET hidden)
 
+    if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "^CHERI" AND USE_REVOCATION)
+      target_link_libraries(${name} cheri_caprevoke)
+      target_compile_definitions(${name} PRIVATE -DSNMALLOC_REVOKE_QUARANTINE=1)
+    endif()
+
     if(EXPOSE_EXTERNAL_PAGEMAP)
       target_compile_definitions(${name} PRIVATE -DSNMALLOC_EXPOSE_PAGEMAP)
     endif()
@@ -175,6 +184,12 @@ if(NOT DEFINED SNMALLOC_ONLY_HEADER_LIBRARY)
         endif()
         target_include_directories(${TESTNAME} PRIVATE src)
         target_link_libraries(${TESTNAME} snmalloc_lib)
+
+        if(${CMAKE_SYSTEM_PROCESSOR} MATCHES "^CHERI" AND USE_REVOCATION)
+          target_link_libraries(${TESTNAME} cheri_caprevoke)
+          target_compile_definitions(${TESTNAME} PRIVATE -DSNMALLOC_REVOKE_QUARANTINE=1)
+        endif()
+
         if (${TEST} MATCHES "release-.*")
           message(STATUS "Adding test: ${TESTNAME} only for release configs")
           add_test(NAME ${TESTNAME} COMMAND ${TESTNAME} CONFIGURATIONS "Release")
