@@ -517,10 +517,9 @@ namespace snmalloc
 
       uint64_t full_epoch; /* When did this fill? */
       size_t footprint; /* How many bytes of the heap do we represent? */
+      uint32_t self_foot; /* What's the size of this object? */
       uint16_t n_ents; /* How many pointers are there in this node? */
       uint16_t first_ent; /* How full did we get?  0: completely */
-
-      /* XXX There's 4 bytes of padding here */
 
       /*
        * A QuarantineNode is followed by n_ents struct QuarantineEntry-s.
@@ -547,9 +546,11 @@ namespace snmalloc
     class QuarantineState
     {
       DLList<struct QuarantineNode> waiting;
+      uint8_t n_waiting;
+      uint64_t waiting_footprint;
+
       struct QuarantineNode* filling;
       uint16_t filling_left;
-      uint8_t n_waiting;
 
       static struct QuarantineNode* newqn(Allocator* a, uint8_t sc)
       {
@@ -567,6 +568,8 @@ namespace snmalloc
         {
           qn->n_ents = (sizeclass_to_size(sc) - sizeof(struct QuarantineNode)) /
             sizeof(struct QuarantineEntry);
+          qn->self_foot = sizeclass_to_size(sc);
+          qn->footprint = qn->self_foot;
           qn->full_epoch = UINT64_MAX;
         }
 
@@ -712,6 +715,9 @@ namespace snmalloc
         struct QuarantineNode* qn = waiting.get_head();
         while ((qn != nullptr) && epoch_clears(epoch, qn->full_epoch))
         {
+          assert(waiting_footprint >= qn->footprint);
+          waiting_footprint -= qn->footprint;
+
           deqqn(a, qn, qn->first_ent);
 
           waiting.pop();
@@ -723,7 +729,7 @@ namespace snmalloc
             qn->prev = nullptr;
             qn->next = nullptr;
             qn->full_epoch = UINT64_MAX;
-            qn->footprint = 0;
+            qn->footprint = qn->self_foot;
             filling = qn;
             filling_left = filling->n_ents;
           }
@@ -802,11 +808,12 @@ namespace snmalloc
 #  endif
 
 #  if SNMALLOC_REVOKE_CHATTY == 1
-        fprintf(stderr, "enquar: foot=%zd\n", filling->footprint);
+        fprintf(stderr, "enquar: foot=0x%zx\n", filling->footprint);
 #  endif
 
         filling->first_ent = filling_left;
         waiting.insert_back(filling);
+        waiting_footprint += filling->footprint;
         filling = nullptr;
         n_waiting++;
 
@@ -845,6 +852,7 @@ namespace snmalloc
       void init(Allocator* a)
       {
         n_waiting = 0;
+        waiting_footprint = 0;
 
         filling = newqn(a, NUM_SMALL_CLASSES);
         assert(filling != nullptr);
@@ -980,6 +988,8 @@ namespace snmalloc
           }
 #  endif
 
+          assert(waiting_footprint >= qn->footprint);
+          waiting_footprint -= qn->footprint;
           deqqn(a, qn, qn->first_ent);
 
 #  if defined(__CHERI_PURE_CAPABILITY__) && (SNMALLOC_PAGEMAP_REDERIVE == 1)
@@ -990,6 +1000,7 @@ namespace snmalloc
           qn = qnext;
         }
         assert(n_waiting == 0);
+        assert(waiting_footprint == 0);
 
         if (filling_left != filling->n_ents)
         {
