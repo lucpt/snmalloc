@@ -79,7 +79,7 @@ namespace test
 int main(int, char**)
 {
   xoroshiro::p128r64 r;
-#if NDEBUG
+#ifdef NDEBUG
   size_t nn = 30;
 #else
   size_t nn = 3;
