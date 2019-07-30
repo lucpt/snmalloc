@@ -41,6 +41,19 @@ namespace snmalloc
 #  define SNMALLOC_QUARANTINE_DEALLOC 0
 #endif
 
+#ifndef SNMALLOC_REVOKE_QUARANTINE
+#  define SNMALLOC_REVOKE_QUARANTINE 0
+#endif
+
+#if SNMALLOC_REVOKE_QUARANTINE == 1
+#  if SNMALLOC_QUARANTINE_DEALLOC == 0
+#    error Revocation depends upon quarantine.
+#  endif
+#  if SNMALLOC_CHERI_SETBOUNDS == 0
+#    error Bounds information is used in revocation; this will not work.
+#  endif
+#endif
+
 /*
  * Deallocation routines which take a size from the caller are unsafe in
  * that they can introduce type confusion within the allocator: we could be
