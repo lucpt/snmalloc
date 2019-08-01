@@ -1508,30 +1508,34 @@ namespace snmalloc
     }
 
   private:
-    void dealloc_real(void* p)
+    SNMALLOC_FAST_PATH void dealloc_real(void* p)
     {
       uint8_t size = pagemap().get(address_cast(p));
 
-      Superslab* super = Superslab::get(p);
-
       if (likely(size == PMSuperslab))
       {
-        RemoteAllocator* target = super->get_allocator();
-        Slab* slab = Slab::get(p);
-        Metaslab& meta = super->get_meta(slab);
-
-        // Reading a remote sizeclass won't fail, since the other allocator
-        // can't reuse the slab, as we have not yet deallocated this
-        // pointer.
-        sizeclass_t sizeclass = meta.sizeclass;
-
-        if (likely(super->get_allocator() == public_state()))
-          small_dealloc(super, p, sizeclass);
-        else
-          remote_dealloc(target, p, sizeclass);
+        dealloc_real_small(p);
         return;
       }
       dealloc_not_small(p, size);
+    }
+
+    SNMALLOC_FAST_PATH void dealloc_real_small(void* p)
+    {
+      Superslab* super = Superslab::get(p);
+      RemoteAllocator* target = super->get_allocator();
+      Slab* slab = Slab::get(p);
+      Metaslab& meta = super->get_meta(slab);
+
+      // Reading a remote sizeclass won't fail, since the other allocator
+      // can't reuse the slab, as we have not yet deallocated this
+      // pointer.
+      sizeclass_t sizeclass = meta.sizeclass;
+
+      if (likely(target == public_state()))
+        small_dealloc(super, p, sizeclass);
+      else
+        remote_dealloc(target, p, sizeclass);
     }
 
     SNMALLOC_SLOW_PATH void dealloc_not_small(void* p, uint8_t size)
@@ -1550,17 +1554,7 @@ namespace snmalloc
 
       if (size == PMMediumslab)
       {
-        Mediumslab* slab = Mediumslab::get(p);
-        RemoteAllocator* target = slab->get_allocator();
-
-        // Reading a remote sizeclass won't fail, since the other allocator
-        // can't reuse the slab, as we have not yet deallocated this pointer.
-        sizeclass_t sizeclass = slab->get_sizeclass();
-
-        if (target == public_state())
-          medium_dealloc(slab, p, sizeclass);
-        else
-          remote_dealloc(target, p, sizeclass);
+        dealloc_real_medium(p);
         return;
       }
 
@@ -1578,6 +1572,21 @@ namespace snmalloc
 #endif
 
       large_dealloc(p, 1ULL << size);
+    }
+
+    inline void dealloc_real_medium(void* p)
+    {
+      Mediumslab* slab = Mediumslab::get(p);
+      RemoteAllocator* target = slab->get_allocator();
+
+      // Reading a remote sizeclass won't fail, since the other allocator
+      // can't reuse the slab, as we have not yet deallocated this pointer.
+      sizeclass_t sizeclass = slab->get_sizeclass();
+
+      if (target == public_state())
+        medium_dealloc(slab, p, sizeclass);
+      else
+        remote_dealloc(target, p, sizeclass);
     }
 
   public:
