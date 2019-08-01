@@ -1224,7 +1224,9 @@ namespace snmalloc
       UNUSED(size);
       return free(p);
 #  else
+#    if SNMALLOC_QUARANTINE_DEALLOC == 0
       handle_message_queue();
+#    endif
 
       void* privp = p;
       if constexpr (SNMALLOC_PAGEMAP_REDERIVE)
@@ -1281,8 +1283,6 @@ namespace snmalloc
 
       constexpr sizeclass_t sizeclass = size_to_sizeclass_const(size);
 
-      handle_message_queue();
-
       if constexpr (sizeclass < NUM_SMALL_CLASSES)
       {
         Superslab* super = Superslab::get(p);
@@ -1324,7 +1324,9 @@ namespace snmalloc
       UNUSED(size);
       return free(p);
 #  else
+#    if SNMALLOC_QUARANTINE_DEALLOC == 0
       handle_message_queue();
+#    endif
 
       void* privp = p;
       if constexpr (SNMALLOC_PAGEMAP_REDERIVE)
@@ -1534,7 +1536,14 @@ namespace snmalloc
 
     SNMALLOC_SLOW_PATH void dealloc_not_small(void* p, uint8_t size)
     {
+#if SNMALLOC_QUARANTINE_DEALLOC == 0
+      /*
+       * If we're quarantining, we'll process the message queue more
+       * sporadically, per quarantine drain, rather than per call to
+       * dealloc_real.  See quarantine_step_drain, above.
+       */
       handle_message_queue();
+#endif
 
       if (p == nullptr)
         return;
@@ -2537,7 +2546,9 @@ namespace snmalloc
       MEASURE_TIME(remote_dealloc, 4, 16);
       assert(target->id() != id());
 
+#if SNMALLOC_QUARANTINE_DEALLOC == 0
       handle_message_queue();
+#endif
 
       void* offseted = apply_cache_friendly_offset(p, sizeclass);
 
