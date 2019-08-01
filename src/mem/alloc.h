@@ -531,15 +531,15 @@ namespace snmalloc
     struct QuarantineEntry
     {
       void* privp; /* Internal pointer to object, with slab permissions */
-#  if (SNMALLOC_REVOKE_QUARANTINE == 1)
       union
       {
+#  if (SNMALLOC_REVOKE_QUARANTINE == 1)
         uint8_t* revbitmap; /* Direct access to large object's shadow */
+#  endif
         uint8_t pmsc; /* Page map size class */
       } addl;
-#    if (SNMALLOC_REVOKE_PARANOIA == 1)
+#  if (SNMALLOC_REVOKE_PARANOIA == 1)
       void* origp;
-#    endif
 #  endif
     };
 
@@ -599,37 +599,56 @@ namespace snmalloc
 #  endif
 
 #  if SNMALLOC_REVOKE_QUARANTINE == 1
-
           uint8_t* revbitmap;
           void* p;
+#  endif
 
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
           if (cheri_gettag(q->addl.revbitmap))
+#  else
+          if (q->addl.pmsc >= SUPERSLAB_BITS)
+#  endif
           {
             /*
              * This is a large object and we have been handed its shadow
              * bitmap access.  privp can be used directly, as its bounds are
              * precisely those of the large object.
              */
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
             revbitmap = q->addl.revbitmap;
             p = privp;
+            a->large_dealloc(privp, cheri_getlen(privp));
+#  else
+            a->large_dealloc(privp,
+              large_sizeclass_to_size(q->addl.pmsc - SUPERSLAB_BITS));
+#  endif
           }
           else if (q->addl.pmsc == PMSuperslab)
           {
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
             Superslab* super = Superslab::get(privp);
+            Metaslab& meta = super->get_meta(Slab::get(privp));
+            sizeclass_t sizeclass = meta.sizeclass;
+
             revbitmap = super->get_revbitmap();
-            p = cheri_csetbounds(
-              privp,
-              sizeclass_to_size(super->get_meta(Slab::get(privp)).sizeclass));
+            p = cheri_csetbounds(privp, sizeclass_to_size(sizeclass));
+#  endif
+            a->dealloc_real_small(privp);
           }
           else
           {
             assert(q->addl.pmsc == PMMediumslab);
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
             Mediumslab* slab = Mediumslab::get(privp);
+            sizeclass_t sizeclass = slab->get_sizeclass();
+
             revbitmap = slab->get_revbitmap();
-            p =
-              cheri_csetbounds(privp, sizeclass_to_size(slab->get_sizeclass()));
+            p = cheri_csetbounds(privp, sizeclass_to_size(sizeclass));
+#  endif
+            a->dealloc_real_medium(privp);
           }
 
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
 #    if SNMALLOC_REVOKE_CHATTY == 1
           cyc_start = AAL::tick();
 #    endif
@@ -642,10 +661,7 @@ namespace snmalloc
           /* Verify that the original pointer has had its tag cleared */
           assert(!cheri_gettag(q->origp));
 #    endif
-
 #  endif
-
-          a->dealloc_real(privp);
         }
 
 #  if SNMALLOC_REVOKE_CHATTY == 1
@@ -896,7 +912,6 @@ namespace snmalloc
           pointer_offset(filling, sizeof(struct QuarantineNode)));
 
         filling_left--;
-#  if SNMALLOC_REVOKE_QUARANTINE == 1
         if ((pmsc == PMSuperslab) || (pmsc == PMMediumslab))
         {
           /*
@@ -916,14 +931,15 @@ namespace snmalloc
            * region going forward: snmalloc does not coalesce large objects
            * nor manage them in aggregation.
            */
+#  if SNMALLOC_REVOKE_QUARANTINE == 1
           q[filling_left].addl.revbitmap = revbitmap;
+#  else
+          q[filling_left].addl.pmsc = pmsc;
+#  endif
           q[filling_left].privp = privpred;
         }
-#    if (SNMALLOC_REVOKE_PARANOIA == 1)
+#  if (SNMALLOC_REVOKE_PARANOIA == 1)
         q[filling_left].origp = p;
-#    endif
-#  else
-        q[filling_left].privp = privp;
 #  endif
 
         filling->footprint += psize;
@@ -1236,24 +1252,30 @@ namespace snmalloc
 
 #    if SNMALLOC_QUARANTINE_DEALLOC == 1
 
-#      if SNMALLOC_REVOKE_QUARANTINE == 1
       uint8_t pmsc;
       constexpr uint8_t sizeclass = size_to_sizeclass_const(size);
       uint8_t* revbitmap = nullptr;
+      void* privpred = privp;
+
       if constexpr (sizeclass < NUM_SMALL_CLASSES)
       {
+#      if SNMALLOC_REVOKE_QUARANTINE == 1
         Superslab* super = Superslab::get(privp);
         revbitmap = super->get_revbitmap();
+#      endif
         pmsc = PMSuperslab;
       }
       else if constexpr (sizeclass < NUM_SIZECLASSES)
       {
+#      if SNMALLOC_REVOKE_QUARANTINE == 1
         Mediumslab* slab = Mediumslab::get(privp);
         revbitmap = slab->get_revbitmap();
+#      endif
         pmsc = PMMediumslab;
       }
       else
       {
+#      if SNMALLOC_REVOKE_QUARANTINE == 1
         // XXX System call!  Would rather fuse into madvise(), if possible.
         int res = caprevoke_shadow(
           CAPREVOKE_SHADOW_NOVMMAP,
@@ -1261,13 +1283,12 @@ namespace snmalloc
           reinterpret_cast<void**>(&revbitmap));
         (void)res; /* quiet NDEBUG builds */
         assert(res == 0);
-        pmsc = SUPERSLAB_BITS;
-      }
-      void* privpred = cheri_csetbounds(privp, size);
-      quarantine.quarantine(this, revbitmap, privp, privpred, p, size, pmsc);
-#      else
-      quarantine.quarantine(this, NULL, privp, NULL, p, size, 0);
+        privpred = cheri_csetbounds(privp, size);
 #      endif
+        pmsc = page_map.get(p);
+      }
+
+      quarantine.quarantine(this, revbitmap, privp, privpred, p, size, pmsc);
 
 #    else
       dealloc_real<size>(privp);
@@ -1336,25 +1357,30 @@ namespace snmalloc
 
 #    if SNMALLOC_QUARANTINE_DEALLOC == 1
 
-#      if SNMALLOC_REVOKE_QUARANTINE == 1
+      uint8_t pmsc;
       uint8_t sizeclass = size_to_sizeclass(size);
       uint8_t* revbitmap = nullptr;
-      uint8_t pmsc;
+      void* privpred = privp;
 
       if (sizeclass < NUM_SMALL_CLASSES)
       {
+#      if SNMALLOC_REVOKE_QUARANTINE == 1
         Superslab* super = Superslab::get(privp);
         revbitmap = super->get_revbitmap();
+#      endif
         pmsc = PMSuperslab;
       }
       else if (sizeclass < NUM_SIZECLASSES)
       {
+#      if SNMALLOC_REVOKE_QUARANTINE == 1
         Mediumslab* slab = Mediumslab::get(privp);
         revbitmap = slab->get_revbitmap();
+#      endif
         pmsc = PMMediumslab;
       }
       else
       {
+#      if SNMALLOC_REVOKE_QUARANTINE == 1
         // XXX System call!  Would rather fuse into madvise(), if possible.
         int res = caprevoke_shadow(
           CAPREVOKE_SHADOW_NOVMMAP,
@@ -1362,15 +1388,12 @@ namespace snmalloc
           reinterpret_cast<void**>(&revbitmap));
         (void)res; /* quiet NDEBUG builds */
         assert(res == 0);
-        pmsc = SUPERSLAB_BITS;
+        privpred = cheri_csetbounds(privp, size);
+#      endif
+        pmsc = page_map.get(p);
       }
 
-      void* privpred = cheri_csetbounds(privp, size);
       quarantine.quarantine(this, revbitmap, privp, privpred, p, size, pmsc);
-#      else
-      quarantine.quarantine(this, NULL, privp, NULL, p, size, 0);
-#      endif
-
 #    else
       dealloc_real(privp, size);
 #    endif
@@ -1460,9 +1483,8 @@ namespace snmalloc
         error("Not allocated by this allocator");
       }
 
-#    if SNMALLOC_REVOKE_QUARANTINE == 1
       uint8_t* revbitmap = nullptr;
-#    endif
+      void* privpred = privp;
 
       if (pmsc == PMSuperslab)
       {
@@ -1491,16 +1513,11 @@ namespace snmalloc
           reinterpret_cast<void**>(&revbitmap));
         (void)res; /* quiet NDEBUG builds */
         assert(res == 0);
+        privpred = cheri_csetbounds(privp, size);
 #    endif
       }
 
-#    if SNMALLOC_REVOKE_QUARANTINE == 1
-      void* privpred = cheri_csetbounds(privp, size);
       quarantine.quarantine(this, revbitmap, privp, privpred, p, size, pmsc);
-#    else
-      quarantine.quarantine(this, NULL, privp, NULL, p, size, 0);
-#    endif
-
 #  else
       dealloc_real(privp);
 #  endif
