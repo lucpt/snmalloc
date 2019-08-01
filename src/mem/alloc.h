@@ -778,6 +778,8 @@ namespace snmalloc
 #  endif
         assert(n_waiting > 0);
         drain(a, epoch);
+
+        a->handle_message_queue();
       }
 
       void quarantine_step(Allocator* a)
