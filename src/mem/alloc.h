@@ -619,8 +619,8 @@ namespace snmalloc
             p = privp;
             a->large_dealloc(privp, cheri_getlen(privp));
 #  else
-            a->large_dealloc(privp,
-              large_sizeclass_to_size(q->addl.pmsc - SUPERSLAB_BITS));
+            a->large_dealloc(
+              privp, large_sizeclass_to_size(q->addl.pmsc - SUPERSLAB_BITS));
 #  endif
           }
           else if (q->addl.pmsc == PMSuperslab)
