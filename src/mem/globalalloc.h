@@ -134,11 +134,6 @@ namespace snmalloc
 
         while (alloc != nullptr)
         {
-#  if SNMALLOC_QUARANTINE_DEALLOC == 1
-          // XXX Force the allocator to consider its quarantine released
-          alloc->quarantine.debug_drain_all(alloc);
-#  endif
-
           // Destroy the message queue so that it has no stub message.
           //
           // Even if we have SNMALLOC_QUARANTINE_DEALLOC on, these will
@@ -152,8 +147,24 @@ namespace snmalloc
             p = next;
           }
 
+#  if SNMALLOC_QUARANTINE_DEALLOC == 1
+          /*
+           * Force the allocator to consider its quarantine released
+           * and to free its pending quarantine metadata node(s).  We'll
+           * reinitialize the quarantine in just a moment!  It's essential
+           * that no frees happen between here and there, and that means,
+           * among other things, that C++isms should be avoided including
+           * stats printout (which uses heap-allocated C++ strings).
+           */
+          alloc->quarantine.debug_drain_all(alloc, true);
+#  endif
+
           if (alloc->stats().is_empty())
             empty_count++;
+
+#  if SNMALLOC_QUARANTINE_DEALLOC == 1
+          alloc->quarantine.init(alloc);
+#  endif
 
           // Place the stub message on the queue.
           alloc->init_message_queue();

@@ -956,7 +956,7 @@ namespace snmalloc
        *
        * Like it says on the tin, only for debugging use.
        */
-      void debug_drain_all(Allocator* a)
+      void debug_drain_all(Allocator* a, bool free_filling)
       {
         struct QuarantineNode* qn = waiting.get_head();
 
@@ -1041,6 +1041,16 @@ namespace snmalloc
           }
 #  endif
           deqqn(a, filling, filling_left);
+        }
+
+        if (free_filling)
+        {
+          a->dealloc_real(filling);
+          filling = nullptr;
+          filling_left = 0;
+        }
+        else
+        {
           filling_left = filling->n_ents;
         }
       }
