@@ -95,7 +95,10 @@ int main(int argc, char** argv)
     test_realloc(our_malloc(size), size, SUCCESS, false);
     test_realloc(our_malloc(size), 0, SUCCESS, true);
     test_realloc(nullptr, size, SUCCESS, false);
-    test_realloc(our_malloc(size), (size_t)-1, ENOMEM, true);
+    void *p = our_malloc(size);
+    assert(p != nullptr);
+    test_realloc(p, (size_t)-1, ENOMEM, true);
+    our_free(p);
   }
 
   test_posix_memalign(0, 0, EINVAL, true);
