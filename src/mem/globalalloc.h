@@ -113,6 +113,7 @@ namespace snmalloc
       // This is a debugging function. It checks that all memory from all
       // allocators has been freed.
       size_t alloc_count = 0;
+      size_t empty_count;
 
       auto* alloc = Parent::iterate();
 
@@ -127,6 +128,7 @@ namespace snmalloc
 
       while (!done)
       {
+        empty_count = 0;
         done = true;
         alloc = Parent::iterate();
 
@@ -138,6 +140,9 @@ namespace snmalloc
 #  endif
 
           // Destroy the message queue so that it has no stub message.
+          //
+          // Even if we have SNMALLOC_QUARANTINE_DEALLOC on, these will
+          // be immediately returned to circulation
           Remote* p = alloc->message_queue().destroy();
 
           while (p != nullptr)
@@ -146,6 +151,9 @@ namespace snmalloc
             alloc->handle_dealloc_remote(p);
             p = next;
           }
+
+          if (alloc->stats().is_empty())
+            empty_count++;
 
           // Place the stub message on the queue.
           alloc->init_message_queue();
@@ -161,18 +169,6 @@ namespace snmalloc
 
           alloc = Parent::iterate(alloc);
         }
-      }
-
-      alloc = Parent::iterate();
-      size_t empty_count = 0;
-
-      while (alloc != nullptr)
-      {
-        // Check that the allocator has freed all memory.
-        if (alloc->stats().is_empty())
-          empty_count++;
-
-        alloc = Parent::iterate(alloc);
       }
 
       if (alloc_count != empty_count)
