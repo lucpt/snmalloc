@@ -2256,7 +2256,6 @@ namespace snmalloc
 
       SNMALLOC_ASSUME(size <= SLAB_SIZE);
       sizeclass_t sizeclass = size_to_sizeclass(size);
-      stats().sizeclass_alloc(sizeclass);
 
       assert(sizeclass < NUM_SMALL_CLASSES);
       auto& fl = small_fast_free_lists[sizeclass];
@@ -2271,6 +2270,7 @@ namespace snmalloc
         {
           large_allocator.memory_provider.zero(p, size);
         }
+        stats().sizeclass_alloc(sizeclass);
         return p;
       }
 
@@ -2288,6 +2288,7 @@ namespace snmalloc
       handle_message_queue();
       size_t rsize = sizeclass_to_size(sizeclass);
       auto& sl = small_classes[sizeclass];
+      stats().sizeclass_alloc(sizeclass);
 
       Slab* slab;
 
