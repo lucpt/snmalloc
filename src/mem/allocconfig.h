@@ -163,7 +163,22 @@ namespace snmalloc
      * Decommit superslabs only when we are informed of memory pressure by the
      * OS, do not decommit anything in normal operation.
      */
-    DecommitSuperLazy
+    DecommitSuperLazy,
+    /**
+     * Decommit medium and large objects on entry to quarantine
+     */
+    DecommitQuarantine,
+    /**
+     * Decommit medium and large objects on entry to quarantine
+     * and superslabs when they become empty.
+     */
+    DecommitQuarantineSuper,
+    /* XXX DecommitQuarantineSuperLazy, if ever quarantine on Windows? */
+
+    /* XXX DecommitQuarantineMP, DecommitQuarantineSuperMP: if we get
+     * MPROT_QUARANTINE landed, we need to know not do to anything when
+     * reissuing.
+     */
   };
 
   static constexpr DecommitStrategy decommit_strategy =
@@ -171,10 +186,18 @@ namespace snmalloc
     USE_DECOMMIT_STRATEGY
 #elif defined(_WIN32) && !defined(OPEN_ENCLAVE)
     DecommitSuperLazy
+#elif SNMALLOC_QUARANTINE_DEALLOC == 1
+    DecommitQuarantineSuper
 #else
     DecommitSuper
 #endif
     ;
+
+  // The DecommitQuarantine* options only make sense if quarantining.
+  static_assert(
+    ((decommit_strategy != DecommitQuarantine) &&
+     (decommit_strategy != DecommitQuarantineSuper)) ||
+    (SNMALLOC_QUARANTINE_DEALLOC == 1));
 
   // The remaining values are derived, not configurable.
   static constexpr size_t POINTER_BITS =

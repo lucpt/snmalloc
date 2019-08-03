@@ -93,8 +93,14 @@ namespace snmalloc
       assert(bits::is_aligned_block<OS_PAGE_SIZE>(p, OS_PAGE_SIZE));
       size = bits::align_up(size, OS_PAGE_SIZE);
 
-      if constexpr (decommit_strategy == DecommitAll)
+      /* XXX revise if MPROT_QUARANTINE */
+      if constexpr (
+        (decommit_strategy == DecommitAll) ||
+        (decommit_strategy == DecommitQuarantine) ||
+        (decommit_strategy == DecommitQuarantineSuper))
+      {
         memory_provider.template notify_using<zero_mem>(p, size);
+      }
       else if constexpr (zero_mem == YesZero)
         memory_provider.template zero<true>(p, size);
 
@@ -105,8 +111,7 @@ namespace snmalloc
     void decommit(void* p, MemoryProvider& memory_provider)
     {
       assert(head > 0);
-      if constexpr (decommit_strategy == DecommitAll)
-        memory_provider.notify_not_using(p, sizeclass_to_size(sizeclass));
+      memory_provider.notify_not_using(p, sizeclass_to_size(sizeclass));
     }
 
     bool dealloc(void* p)

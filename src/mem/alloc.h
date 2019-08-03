@@ -1256,6 +1256,7 @@ namespace snmalloc
       constexpr uint8_t sizeclass = size_to_sizeclass_const(size);
       uint8_t* revbitmap = nullptr;
       void* privpred = privp;
+      size_t qsize = size;
 
       if constexpr (sizeclass < NUM_SMALL_CLASSES)
       {
@@ -1267,11 +1268,20 @@ namespace snmalloc
       }
       else if constexpr (sizeclass < NUM_SIZECLASSES)
       {
-#      if SNMALLOC_REVOKE_QUARANTINE == 1
         Mediumslab* slab = Mediumslab::get(privp);
+#      if SNMALLOC_REVOKE_QUARANTINE == 1
         revbitmap = slab->get_revbitmap();
 #      endif
         pmsc = PMMediumslab;
+
+        /* XXX revise if MPROT_QUARANTINE */
+        if constexpr (
+          (decommit_strategy == DecommitQuarantine) ||
+          (decommit_strategy == DecommitQuarantineSuper))
+        {
+          slab->decommit(privp, large_allocator.memory_provider);
+          qsize = 0;
+        }
       }
       else
       {
@@ -1286,9 +1296,19 @@ namespace snmalloc
         privpred = cheri_csetbounds(privp, size);
 #      endif
         pmsc = page_map.get(p);
+
+        /* XXX revise if MPROT_QUARANTINE */
+        if constexpr (
+          (decommit_strategy == DecommitQuarantine) ||
+          (decommit_strategy == DecommitQuarantineSuper))
+        {
+          large_allocator.decommit_most(
+            privp, pmsc - SUPERSLAB_BITS, large_allocator.memory_provider);
+          qsize = OS_PAGE_SIZE;
+        }
       }
 
-      quarantine.quarantine(this, revbitmap, privp, privpred, p, size, pmsc);
+      quarantine.quarantine(this, revbitmap, privp, privpred, p, qsize, pmsc);
 
 #    else
       dealloc_real<size>(privp);
@@ -1361,6 +1381,7 @@ namespace snmalloc
       uint8_t sizeclass = size_to_sizeclass(size);
       uint8_t* revbitmap = nullptr;
       void* privpred = privp;
+      size_t qsize = size;
 
       if (sizeclass < NUM_SMALL_CLASSES)
       {
@@ -1372,11 +1393,20 @@ namespace snmalloc
       }
       else if (sizeclass < NUM_SIZECLASSES)
       {
-#      if SNMALLOC_REVOKE_QUARANTINE == 1
         Mediumslab* slab = Mediumslab::get(privp);
+#      if SNMALLOC_REVOKE_QUARANTINE == 1
         revbitmap = slab->get_revbitmap();
 #      endif
         pmsc = PMMediumslab;
+
+        /* XXX revise if MPROT_QUARANTINE */
+        if constexpr (
+          (decommit_strategy == DecommitQuarantine) ||
+          (decommit_strategy == DecommitQuarantineSuper))
+        {
+          slab->decommit(privp, large_allocator.memory_provider);
+          qsize = 0;
+        }
       }
       else
       {
@@ -1391,9 +1421,19 @@ namespace snmalloc
         privpred = cheri_csetbounds(privp, size);
 #      endif
         pmsc = page_map.get(p);
+
+        /* XXX revise if MPROT_QUARANTINE */
+        if constexpr (
+          (decommit_strategy == DecommitQuarantine) ||
+          (decommit_strategy == DecommitQuarantineSuper))
+        {
+          large_allocator.decommit_most(
+            privp, pmsc - SUPERSLAB_BITS, large_allocator.memory_provider);
+          qsize = OS_PAGE_SIZE;
+        }
       }
 
-      quarantine.quarantine(this, revbitmap, privp, privpred, p, size, pmsc);
+      quarantine.quarantine(this, revbitmap, privp, privpred, p, qsize, pmsc);
 #    else
       dealloc_real(privp, size);
 #    endif
@@ -1501,6 +1541,14 @@ namespace snmalloc
 #    if SNMALLOC_REVOKE_QUARANTINE == 1
         revbitmap = slab->get_revbitmap();
 #    endif
+        /* XXX revise if MPROT_QUARANTINE */
+        if constexpr (
+          (decommit_strategy == DecommitQuarantine) ||
+          (decommit_strategy == DecommitQuarantineSuper))
+        {
+          slab->decommit(privp, large_allocator.memory_provider);
+          size = 0;
+        }
       }
       else
       {
@@ -1515,6 +1563,16 @@ namespace snmalloc
         assert(res == 0);
         privpred = cheri_csetbounds(privp, size);
 #    endif
+
+        /* XXX revise if MPROT_QUARANTINE */
+        if constexpr (
+          (decommit_strategy == DecommitQuarantine) ||
+          (decommit_strategy == DecommitQuarantineSuper))
+        {
+          large_allocator.decommit_most(
+            privp, pmsc - SUPERSLAB_BITS, large_allocator.memory_provider);
+          size = OS_PAGE_SIZE;
+        }
       }
 
       quarantine.quarantine(this, revbitmap, privp, privpred, p, size, pmsc);
@@ -2471,7 +2529,10 @@ namespace snmalloc
     {
       MEASURE_TIME(medium_dealloc, 4, 16);
       stats().sizeclass_dealloc(sizeclass);
-      slab->decommit(p, large_allocator.memory_provider);
+      if constexpr (decommit_strategy == DecommitAll)
+      {
+        slab->decommit(p, large_allocator.memory_provider);
+      }
       bool was_full = slab->dealloc(p);
 
 #ifdef CHECK_CLIENT
@@ -2497,6 +2558,10 @@ namespace snmalloc
           large_allocator.memory_provider.notify_not_using(
             pointer_offset(slab, OS_PAGE_SIZE), SUPERSLAB_SIZE - OS_PAGE_SIZE);
         }
+        /*
+         * DecommitAll will have been taken care of in the individual
+         * medium_dealloc calls making up this slab, above.
+         */
 
         pagemap().clear_slab(slab);
         large_allocator.dealloc(slab, 0);

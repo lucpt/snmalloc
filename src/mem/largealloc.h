@@ -413,10 +413,9 @@ namespace snmalloc
     decommit_most(void* p, size_t large_class, MemoryProvider& memory_provider)
     {
       /* Decommit all but the first page of this object */
-      if constexpr (decommit_strategy == DecommitAll)
-        memory_provider.notify_not_using(
-          pointer_offset(p, OS_PAGE_SIZE),
-          large_sizeclass_to_size(large_class) - OS_PAGE_SIZE);
+      memory_provider.notify_not_using(
+        pointer_offset(p, OS_PAGE_SIZE),
+        large_sizeclass_to_size(large_class) - OS_PAGE_SIZE);
     }
 
     void dealloc(void* p, size_t large_class)
