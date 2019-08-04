@@ -537,6 +537,12 @@ namespace snmalloc
         uint8_t* revbitmap; /* Direct access to large object's shadow */
 #  endif
         uint8_t pmsc; /* Page map size class */
+        // XXX In addition to pmsc, for the slab classes, should we also
+        // provide the actual sizeclass?  There's room, but we'll need to
+        // overhaul the various dealloc_reals to take the sizeclass.  Right
+        // now, we're basically relying on inlining to observe that the read
+        // we do in revocation matches the read we do when deallocating, but
+        // that won't be true if we add this side channel.
       } addl;
 #  if (SNMALLOC_REVOKE_PARANOIA == 1)
       void* origp;
@@ -1273,6 +1279,7 @@ namespace snmalloc
 #      if SNMALLOC_REVOKE_QUARANTINE == 1
         Superslab* super = Superslab::get(privp);
         revbitmap = super->get_revbitmap();
+        privpred = cheri_csetbounds(privp, size);
 #      endif
         pmsc = PMSuperslab;
       }
@@ -1281,6 +1288,7 @@ namespace snmalloc
         Mediumslab* slab = Mediumslab::get(privp);
 #      if SNMALLOC_REVOKE_QUARANTINE == 1
         revbitmap = slab->get_revbitmap();
+        privpred = cheri_csetbounds(privp, size);
 #      endif
         pmsc = PMMediumslab;
 
@@ -1398,6 +1406,7 @@ namespace snmalloc
 #      if SNMALLOC_REVOKE_QUARANTINE == 1
         Superslab* super = Superslab::get(privp);
         revbitmap = super->get_revbitmap();
+        privpred = cheri_csetbounds(privp, size);
 #      endif
         pmsc = PMSuperslab;
       }
@@ -1406,6 +1415,7 @@ namespace snmalloc
         Mediumslab* slab = Mediumslab::get(privp);
 #      if SNMALLOC_REVOKE_QUARANTINE == 1
         revbitmap = slab->get_revbitmap();
+        privpred = cheri_csetbounds(privp, size);
 #      endif
         pmsc = PMMediumslab;
 
@@ -1542,6 +1552,7 @@ namespace snmalloc
         size = sizeclass_to_size(super->get_meta(Slab::get(privp)).sizeclass);
 #    if SNMALLOC_REVOKE_QUARANTINE == 1
         revbitmap = super->get_revbitmap();
+        privpred = cheri_csetbounds(privp, size);
 #    endif
       }
       else if (pmsc == PMMediumslab)
@@ -1550,6 +1561,7 @@ namespace snmalloc
         size = sizeclass_to_size(slab->get_sizeclass());
 #    if SNMALLOC_REVOKE_QUARANTINE == 1
         revbitmap = slab->get_revbitmap();
+        privpred = cheri_csetbounds(privp, size);
 #    endif
         /* XXX revise if MPROT_QUARANTINE */
         if constexpr (
