@@ -1051,6 +1051,10 @@ namespace snmalloc
 
         if (free_filling)
         {
+#  if defined(__CHERI_PURE_CAPABILITY__) && (SNMALLOC_PAGEMAP_REDERIVE == 1)
+          filling =
+            static_cast<struct QuarantineNode*>(a->pagemap().getp(filling));
+#  endif
           a->dealloc_real(filling);
           filling = nullptr;
           filling_left = 0;
