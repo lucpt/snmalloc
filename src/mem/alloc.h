@@ -637,7 +637,7 @@ namespace snmalloc
             sizeclass_t sizeclass = meta.sizeclass;
 
             revbitmap = super->get_revbitmap();
-            p = cheri_csetbounds(privp, sizeclass_to_size(sizeclass));
+            p = cheri_csetboundsexact(privp, sizeclass_to_size(sizeclass));
 #  endif
             a->dealloc_real_small(privp);
           }
@@ -649,7 +649,7 @@ namespace snmalloc
             sizeclass_t sizeclass = slab->get_sizeclass();
 
             revbitmap = slab->get_revbitmap();
-            p = cheri_csetbounds(privp, sizeclass_to_size(sizeclass));
+            p = cheri_csetboundsexact(privp, sizeclass_to_size(sizeclass));
 #  endif
             a->dealloc_real_medium(privp);
           }
@@ -1128,7 +1128,7 @@ namespace snmalloc
       ret = (ret == NULL) ?
         ret :
         cheri_andperm(
-          cheri_csetbounds(ret, size),
+          cheri_csetboundsexact(ret, size),
           CHERI_PERMS_USERSPACE_DATA & ~CHERI_PERM_CHERIABI_VMMAP);
 #  endif
 
@@ -1179,7 +1179,7 @@ namespace snmalloc
       ret = (ret == NULL) ?
         ret :
         cheri_andperm(
-          cheri_csetbounds(ret, size),
+          cheri_csetboundsexact(ret, size),
           CHERI_PERMS_USERSPACE_DATA & ~CHERI_PERM_CHERIABI_VMMAP);
 #  endif
 
@@ -1283,7 +1283,7 @@ namespace snmalloc
 #      if SNMALLOC_REVOKE_QUARANTINE == 1
         Superslab* super = Superslab::get(privp);
         revbitmap = super->get_revbitmap();
-        privpred = cheri_csetbounds(privp, size);
+        privpred = cheri_csetboundsexact(privp, size);
 #      endif
         pmsc = PMSuperslab;
       }
@@ -1292,7 +1292,7 @@ namespace snmalloc
         Mediumslab* slab = Mediumslab::get(privp);
 #      if SNMALLOC_REVOKE_QUARANTINE == 1
         revbitmap = slab->get_revbitmap();
-        privpred = cheri_csetbounds(privp, size);
+        privpred = cheri_csetboundsexact(privp, size);
 #      endif
         pmsc = PMMediumslab;
 
@@ -1315,7 +1315,7 @@ namespace snmalloc
           reinterpret_cast<void**>(&revbitmap));
         (void)res; /* quiet NDEBUG builds */
         assert(res == 0);
-        privpred = cheri_csetbounds(privp, size);
+        privpred = cheri_csetboundsexact(privp, size);
 #      endif
         pmsc = page_map.get(p);
 
@@ -1410,7 +1410,7 @@ namespace snmalloc
 #      if SNMALLOC_REVOKE_QUARANTINE == 1
         Superslab* super = Superslab::get(privp);
         revbitmap = super->get_revbitmap();
-        privpred = cheri_csetbounds(privp, size);
+        privpred = cheri_csetboundsexact(privp, size);
 #      endif
         pmsc = PMSuperslab;
       }
@@ -1419,7 +1419,7 @@ namespace snmalloc
         Mediumslab* slab = Mediumslab::get(privp);
 #      if SNMALLOC_REVOKE_QUARANTINE == 1
         revbitmap = slab->get_revbitmap();
-        privpred = cheri_csetbounds(privp, size);
+        privpred = cheri_csetboundsexact(privp, size);
 #      endif
         pmsc = PMMediumslab;
 
@@ -1442,7 +1442,7 @@ namespace snmalloc
           reinterpret_cast<void**>(&revbitmap));
         (void)res; /* quiet NDEBUG builds */
         assert(res == 0);
-        privpred = cheri_csetbounds(privp, size);
+        privpred = cheri_csetboundsexact(privp, size);
 #      endif
         pmsc = page_map.get(p);
 
@@ -1556,7 +1556,7 @@ namespace snmalloc
         size = sizeclass_to_size(super->get_meta(Slab::get(privp)).sizeclass);
 #    if SNMALLOC_REVOKE_QUARANTINE == 1
         revbitmap = super->get_revbitmap();
-        privpred = cheri_csetbounds(privp, size);
+        privpred = cheri_csetboundsexact(privp, size);
 #    endif
       }
       else if (pmsc == PMMediumslab)
@@ -1565,7 +1565,7 @@ namespace snmalloc
         size = sizeclass_to_size(slab->get_sizeclass());
 #    if SNMALLOC_REVOKE_QUARANTINE == 1
         revbitmap = slab->get_revbitmap();
-        privpred = cheri_csetbounds(privp, size);
+        privpred = cheri_csetboundsexact(privp, size);
 #    endif
         /* XXX revise if MPROT_QUARANTINE */
         if constexpr (
@@ -1587,7 +1587,7 @@ namespace snmalloc
           reinterpret_cast<void**>(&revbitmap));
         (void)res; /* quiet NDEBUG builds */
         assert(res == 0);
-        privpred = cheri_csetbounds(privp, size);
+        privpred = cheri_csetboundsexact(privp, size);
 #    endif
 
         /* XXX revise if MPROT_QUARANTINE */
