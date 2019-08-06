@@ -969,7 +969,6 @@ namespace snmalloc
 #  if SNMALLOC_REVOKE_QUARANTINE == 1
         struct caprevoke_stats crst;
         uint64_t start_epoch;
-        bool did_revoke = false;
 
 #    if SNMALLOC_REVOKE_DRY_RUN == 0
         int res = caprevoke(
@@ -1008,7 +1007,6 @@ namespace snmalloc
             uint64_t cyc_fini = AAL::tick();
             print_revoke_stats(stderr, "dbgw", a, &crst, cyc_fini - cyc_init);
 #    endif
-            did_revoke = true;
           }
 #  endif
 
@@ -1029,7 +1027,7 @@ namespace snmalloc
         if (filling_left != filling->n_ents)
         {
 #  if SNMALLOC_REVOKE_QUARANTINE == 1
-          while (!did_revoke && !epoch_clears(crst.epoch_fini, start_epoch))
+          while (!epoch_clears(crst.epoch_fini, start_epoch))
           {
 #    if SNMALLOC_REVOKE_CHATTY == 1
             uint64_t cyc_init = AAL::tick();
