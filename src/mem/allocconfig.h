@@ -41,6 +41,10 @@ namespace snmalloc
 #  define SNMALLOC_QUARANTINE_DEALLOC 0
 #endif
 
+#ifndef SNMALLOC_QUARANTINE_CHATTY
+#  define SNMALLOC_QUARANTINE_CHATTY 0
+#endif
+
 #ifndef SNMALLOC_REVOKE_QUARANTINE
 #  define SNMALLOC_REVOKE_QUARANTINE 0
 #endif
@@ -49,10 +53,6 @@ namespace snmalloc
 
 #  ifndef SNMALLOC_REVOKE_PARANOIA
 #    define SNMALLOC_REVOKE_PARANOIA 0
-#  endif
-
-#  ifndef SNMALLOC_REVOKE_CHATTY
-#    define SNMALLOC_REVOKE_CHATTY 0
 #  endif
 
 #  ifndef SNMALLOC_REVOKE_DRY_RUN

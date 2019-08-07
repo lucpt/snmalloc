@@ -588,7 +588,7 @@ namespace snmalloc
         uint16_t qix = initpos;
         struct QuarantineEntry* q = reinterpret_cast<struct QuarantineEntry*>(
           pointer_offset(qn, sizeof(struct QuarantineNode)));
-#  if SNMALLOC_REVOKE_CHATTY == 1
+#  if (SNMALLOC_REVOKE_QUARANTINE == 1) && (SNMALLOC_QUARANTINE_CHATTY == 1)
         uint64_t bitmap_cycles = 0;
         uint64_t cyc_start;
 #  endif
@@ -655,11 +655,11 @@ namespace snmalloc
           }
 
 #  if SNMALLOC_REVOKE_QUARANTINE == 1
-#    if SNMALLOC_REVOKE_CHATTY == 1
+#    if SNMALLOC_QUARANTINE_CHATTY == 1
           cyc_start = AAL::tick();
 #    endif
           caprev_shadow_nomap_clear(reinterpret_cast<uint64_t*>(revbitmap), p);
-#    if SNMALLOC_REVOKE_CHATTY == 1
+#    if SNMALLOC_QUARANTINE_CHATTY == 1
           bitmap_cycles += AAL::tick() - cyc_start;
 #    endif
 
@@ -670,17 +670,17 @@ namespace snmalloc
 #  endif
         }
 
-#  if SNMALLOC_REVOKE_CHATTY == 1
-        fprintf(
-          stderr,
-          "dequar: a=%p foot=0x%zx bmcyc=0x%" PRIx64 "\n",
-          a,
-          qn->footprint,
-          bitmap_cycles);
+#  if SNMALLOC_QUARANTINE_CHATTY == 1
+#    if SNMALLOC_REVOKE_QUARANTINE == 1
+        fprintf(stderr, "dequar: a=%p qn=%p foot=0x%zx bmcyc=0x%" PRIx64 "\n",
+          a, qn, qn->footprint, bitmap_cycles);
+#    else
+        fprintf(stderr, "dequar: a=%p qn=%p foot=0x%zx\n", a, qn, qn->footprint);
+#    endif
 #  endif
       }
 
-#  if SNMALLOC_REVOKE_CHATTY == 1
+#  if SNMALLOC_QUARANTINE_CHATTY == 1
       void print_revoke_stats(
         FILE* f,
         const char* what,
@@ -781,7 +781,7 @@ namespace snmalloc
         QuarantineNode* qn = waiting.get_head();
         do
         {
-#    if SNMALLOC_REVOKE_CHATTY == 1
+#    if SNMALLOC_QUARANTINE_CHATTY == 1
           uint64_t cyc_init = AAL::tick();
 #    endif
 #    if SNMALLOC_REVOKE_DRY_RUN == 0
@@ -789,7 +789,7 @@ namespace snmalloc
           UNUSED(res);
           assert(res == 0);
 #    endif
-#    if SNMALLOC_REVOKE_CHATTY == 1
+#    if SNMALLOC_QUARANTINE_CHATTY == 1
           uint64_t cyc_fini = AAL::tick();
           print_revoke_stats(stderr, "stdr", a, &crst, cyc_fini - cyc_init);
 #    endif
@@ -811,7 +811,7 @@ namespace snmalloc
 #  if SNMALLOC_REVOKE_QUARANTINE == 1
         {
           struct caprevoke_stats crst;
-#    if SNMALLOC_REVOKE_CHATTY == 1
+#    if SNMALLOC_QUARANTINE_CHATTY == 1
           uint64_t cyc_init = AAL::tick();
 #    endif
 #    if SNMALLOC_REVOKE_DRY_RUN == 0
@@ -820,7 +820,7 @@ namespace snmalloc
           UNUSED(res);
           assert(res == 0);
 #    endif
-#    if SNMALLOC_REVOKE_CHATTY == 1
+#    if SNMALLOC_QUARANTINE_CHATTY == 1
           uint64_t cyc_fini = AAL::tick();
           print_revoke_stats(stderr, "step", a, &crst, cyc_fini - cyc_init);
 #    endif
@@ -831,8 +831,8 @@ namespace snmalloc
         epoch = 4;
 #  endif
 
-#  if SNMALLOC_REVOKE_CHATTY == 1
-        fprintf(stderr, "enquar: foot=0x%zx\n", filling->footprint);
+#  if SNMALLOC_QUARANTINE_CHATTY == 1
+        fprintf(stderr, "enquar: a=%p qn=%p foot=0x%zx\n", a, filling, filling->footprint);
 #  endif
 
         filling->first_ent = filling_left;
@@ -995,7 +995,7 @@ namespace snmalloc
 #  if SNMALLOC_REVOKE_QUARANTINE == 1
           while (!epoch_clears(crst.epoch_fini, qn->full_epoch))
           {
-#    if SNMALLOC_REVOKE_CHATTY == 1
+#    if SNMALLOC_QUARANTINE_CHATTY == 1
             uint64_t cyc_init = AAL::tick();
 #    endif
 #    if SNMALLOC_REVOKE_DRY_RUN == 0
@@ -1003,7 +1003,7 @@ namespace snmalloc
             UNUSED(res);
             assert(res == 0);
 #    endif
-#    if SNMALLOC_REVOKE_CHATTY == 1
+#    if SNMALLOC_QUARANTINE_CHATTY == 1
             uint64_t cyc_fini = AAL::tick();
             print_revoke_stats(stderr, "dbgw", a, &crst, cyc_fini - cyc_init);
 #    endif
@@ -1029,7 +1029,7 @@ namespace snmalloc
 #  if SNMALLOC_REVOKE_QUARANTINE == 1
           while (!epoch_clears(crst.epoch_fini, start_epoch))
           {
-#    if SNMALLOC_REVOKE_CHATTY == 1
+#    if SNMALLOC_QUARANTINE_CHATTY == 1
             uint64_t cyc_init = AAL::tick();
 #    endif
 #    if SNMALLOC_REVOKE_DRY_RUN == 0
@@ -1038,7 +1038,7 @@ namespace snmalloc
             UNUSED(res);
             assert(res == 0);
 #    endif
-#    if SNMALLOC_REVOKE_CHATTY == 1
+#    if SNMALLOC_QUARANTINE_CHATTY == 1
             uint64_t cyc_fini = AAL::tick();
             print_revoke_stats(stderr, "dbgf", a, &crst, cyc_fini - cyc_init);
 #    endif
