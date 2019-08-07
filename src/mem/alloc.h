@@ -851,13 +851,20 @@ namespace snmalloc
         drain(a, epoch);
 #  endif
 
-        if ((filling == nullptr) && (n_waiting > 1)) // XXX n_waiting vs. ?
+        bool full = false;
+
+        full |= waiting_footprint > SNMALLOC_QUARANTINE_PER_ALLOC_THRESHOLD;
+#  ifdef SNMALLOC_QUARANTINE_PER_ALLOC_CHUNK_THRESHOLD
+        full |= n_waiting > SNMALLOC_QUARANTINE_PER_ALLOC_CHUNK_THRESHOLD;
+#  endif
+
+        if ((filling == nullptr) && full)
         {
           quarantine_step_drain(a, "full");
         }
         else
         {
-          QuarantineNode* qn = newqn(a, NUM_SMALL_CLASSES);
+          QuarantineNode* qn = newqn(a, SNMALLOC_QUARANTINE_CHUNK_SIZECLASS);
           if (qn == nullptr)
           {
             quarantine_step_drain(a, "noqn");
@@ -878,7 +885,7 @@ namespace snmalloc
         n_waiting = 0;
         waiting_footprint = 0;
 
-        filling = newqn(a, NUM_SMALL_CLASSES);
+        filling = newqn(a, SNMALLOC_QUARANTINE_CHUNK_SIZECLASS);
         assert(filling != nullptr);
 
         filling_left = filling->n_ents;

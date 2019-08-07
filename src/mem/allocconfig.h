@@ -41,6 +41,39 @@ namespace snmalloc
 #  define SNMALLOC_QUARANTINE_DEALLOC 0
 #endif
 
+#if SNMALLOC_QUARANTINE_DEALLOC == 1
+/* Quarantine policy knob(s). */
+
+/*
+ * Each allocator is only willing to pin some footprint in quarantine, but
+ * note that allocators are per-thread
+ */
+#  ifndef SNMALLOC_QUARANTINE_PER_ALLOC_THRESHOLD
+#    define SNMALLOC_QUARANTINE_PER_ALLOC_THRESHOLD (32 * 1024 * 1024)
+#  endif
+
+/*
+ * Optionally, prevent the quarantine queue from growing too big, even
+ * if not pinning too much physmem.
+ */
+#  ifdef SNMALLOC_QUARANTINE_PER_ALLOC_CHUNK_THRESHOLD
+#    if SNMALLOC_QUARANTINE_PER_ALLOC_CHUNK_THRESHOLD < 0
+#      error Quarantine must be allowed at least one chunk
+#    endif
+#  endif
+
+/*
+ * The size of the "chunk"s holding quarantine might matter, so make it a
+ * knob here.  This is a sizeclass parameter and has only been tested with
+ * medium classes, * somewhere between NUM_SMALL_CLASSES and
+ * NUM_SIZECLASSES-1.
+ */
+#  ifndef SNMALLOC_QUARANTINE_CHUNK_SIZECLASS
+#    define SNMALLOC_QUARANTINE_CHUNK_SIZECLASS (NUM_SMALL_CLASSES)
+#  endif
+
+#endif
+
 #ifndef SNMALLOC_QUARANTINE_CHATTY
 #  define SNMALLOC_QUARANTINE_CHATTY 0
 #endif
