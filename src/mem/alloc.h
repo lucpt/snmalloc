@@ -1271,6 +1271,16 @@ namespace snmalloc
       handle_message_queue();
 #    endif
 
+#  if SNMALLOC_QUARANTINE_DEALLOC == 1
+      /*
+       * Without quarantine, this is handled on the slow path,
+       * and while we could defer the "Not allocated" test to
+       * post-quarantine, it's probably better to do it now.
+       */
+      if (p == nullptr)
+        return;
+#  endif
+
       void* privp = p;
       if constexpr (SNMALLOC_PAGEMAP_REDERIVE)
       {
@@ -1397,6 +1407,16 @@ namespace snmalloc
 #    if SNMALLOC_QUARANTINE_DEALLOC == 0
       handle_message_queue();
 #    endif
+
+#  if SNMALLOC_QUARANTINE_DEALLOC == 1
+      /*
+       * Without quarantine, this is handled on the slow path,
+       * and while we could defer the "Not allocated" test to
+       * post-quarantine, it's probably better to do it now.
+       */
+      if (p == nullptr)
+        return;
+#  endif
 
       void* privp = p;
       if constexpr (SNMALLOC_PAGEMAP_REDERIVE)
@@ -1539,6 +1559,16 @@ namespace snmalloc
 #ifdef USE_MALLOC
       return free(p);
 #else
+
+#  if SNMALLOC_QUARANTINE_DEALLOC == 1
+      /*
+       * Without quarantine, this is handled on the slow path,
+       * and while we could defer the "Not allocated" test to
+       * post-quarantine, it's probably better to do it now.
+       */
+      if (p == nullptr)
+        return;
+#  endif
 
       void* privp = p;
       if constexpr (SNMALLOC_PAGEMAP_REDERIVE)
