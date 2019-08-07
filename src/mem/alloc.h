@@ -583,9 +583,9 @@ namespace snmalloc
       }
 
       static void
-      deqqn(Allocator* a, struct QuarantineNode* qn, uint16_t initpos)
+      deqqn(Allocator* a, struct QuarantineNode* qn)
       {
-        uint16_t qix = initpos;
+        uint16_t qix = qn->first_ent;
         struct QuarantineEntry* q = reinterpret_cast<struct QuarantineEntry*>(
           pointer_offset(qn, sizeof(struct QuarantineNode)));
 #  if (SNMALLOC_REVOKE_QUARANTINE == 1) && (SNMALLOC_QUARANTINE_CHATTY == 1)
@@ -593,7 +593,7 @@ namespace snmalloc
         uint64_t cyc_start;
 #  endif
 
-        q = pointer_offset(q, initpos * sizeof(struct QuarantineEntry));
+        q = pointer_offset(q, qix * sizeof(struct QuarantineEntry));
 
         for (; qix < qn->n_ents; qix++, q++)
         {
@@ -669,6 +669,7 @@ namespace snmalloc
 #    endif
 #  endif
         }
+        qn->first_ent = qix;
 
 #  if SNMALLOC_QUARANTINE_CHATTY == 1
 #    if SNMALLOC_REVOKE_QUARANTINE == 1
@@ -740,7 +741,7 @@ namespace snmalloc
           assert(waiting_footprint >= qn->footprint);
           waiting_footprint -= qn->footprint;
 
-          deqqn(a, qn, qn->first_ent);
+          deqqn(a, qn);
 
           waiting.pop();
           n_waiting--;
@@ -1019,7 +1020,7 @@ namespace snmalloc
 
           assert(waiting_footprint >= qn->footprint);
           waiting_footprint -= qn->footprint;
-          deqqn(a, qn, qn->first_ent);
+          deqqn(a, qn);
 
 #  if defined(__CHERI_PURE_CAPABILITY__) && (SNMALLOC_PAGEMAP_REDERIVE == 1)
           qn = static_cast<struct QuarantineNode*>(a->pagemap().getp(qn));
@@ -1051,7 +1052,8 @@ namespace snmalloc
 #    endif
           }
 #  endif
-          deqqn(a, filling, filling_left);
+          filling->first_ent = filling_left;
+          deqqn(a, filling);
         }
 
         if (free_filling)
