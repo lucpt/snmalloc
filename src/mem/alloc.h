@@ -673,10 +673,11 @@ namespace snmalloc
 
 #  if SNMALLOC_QUARANTINE_CHATTY == 1
 #    if SNMALLOC_REVOKE_QUARANTINE == 1
-        fprintf(stderr, "dequar: a=%p qn=%p foot=0x%zx bmcyc=0x%" PRIx64 "\n",
-          a, qn, qn->footprint, bitmap_cycles);
+        fprintf(stderr, "dequar: cyccount=0x%" PRIx64 " a=%p qn=%p foot=0x%zx bmcyc=0x%" PRIx64 "\n",
+          AAL::tick(), a, qn, qn->footprint, bitmap_cycles);
 #    else
-        fprintf(stderr, "dequar: a=%p qn=%p foot=0x%zx\n", a, qn, qn->footprint);
+        fprintf(stderr, "dequar: cyccount=0x%" PRIx64 " a=%p qn=%p foot=0x%zx\n",
+          AAL::tick(), a, qn, qn->footprint);
 #    endif
 #  endif
       }
@@ -687,7 +688,8 @@ namespace snmalloc
         const char* what,
         Allocator* a,
         struct caprevoke_stats* crst,
-        uint64_t ccount)
+        uint64_t cyc_init,
+        uint64_t cyc_fini)
       {
 #    ifdef __mips__
         //__asm__ __volatile__("li $0, 0xdead"); // trace off
@@ -695,12 +697,13 @@ namespace snmalloc
         fprintf(
           f,
           "revoke: %s"
-          " a=%p"
+          " cyccnt=%" PRIx64 " a=%p"
           " einit=0x%03" PRIx64 " efini=0x%03" PRIx64 " scand=0x%" PRIx64
           " pfro=0x%" PRIx64 " pfrw=0x%" PRIx64 " pfsk=0x%" PRIx64
           " clook=0x%" PRIx64 " cnuke=0x%" PRIx64 " tpage=0x%" PRIx64
           " tcrev=0x%" PRIx64 "\n",
           what,
+          cyc_fini,
           a,
           crst->epoch_init,
           crst->epoch_fini,
@@ -711,7 +714,7 @@ namespace snmalloc
           crst->caps_found,
           crst->caps_cleared,
           crst->page_scan_cycles,
-          ccount);
+          cyc_fini - cyc_init);
 #    ifdef __mips__
         //__asm__ __volatile__("li $0, 0xbeef"); // trace on
 #    endif
@@ -792,7 +795,7 @@ namespace snmalloc
 #    endif
 #    if SNMALLOC_QUARANTINE_CHATTY == 1
           uint64_t cyc_fini = AAL::tick();
-          print_revoke_stats(stderr, "stdr", a, &crst, cyc_fini - cyc_init);
+          print_revoke_stats(stderr, "stdr", a, &crst, cyc_init, cyc_fini);
 #    endif
         } while (!epoch_clears(crst.epoch_fini, qn->full_epoch));
         epoch = crst.epoch_fini;
@@ -823,7 +826,7 @@ namespace snmalloc
 #    endif
 #    if SNMALLOC_QUARANTINE_CHATTY == 1
           uint64_t cyc_fini = AAL::tick();
-          print_revoke_stats(stderr, "step", a, &crst, cyc_fini - cyc_init);
+          print_revoke_stats(stderr, "step", a, &crst, cyc_init, cyc_fini);
 #    endif
           filling->full_epoch = crst.epoch_init;
           epoch = crst.epoch_fini;
@@ -833,7 +836,8 @@ namespace snmalloc
 #  endif
 
 #  if SNMALLOC_QUARANTINE_CHATTY == 1
-        fprintf(stderr, "enquar: a=%p qn=%p foot=0x%zx\n", a, filling, filling->footprint);
+        fprintf(stderr, "enquar: cyccount=0x%" PRIx64 " a=%p qn=%p foot=0x%zx waiting=0x%zx\n",
+                AAL::tick(), a, filling, filling->footprint, waiting_footprint);
 #  endif
 
         filling->first_ent = filling_left;
@@ -1013,7 +1017,7 @@ namespace snmalloc
 #    endif
 #    if SNMALLOC_QUARANTINE_CHATTY == 1
             uint64_t cyc_fini = AAL::tick();
-            print_revoke_stats(stderr, "dbgw", a, &crst, cyc_fini - cyc_init);
+            print_revoke_stats(stderr, "dbgw", a, &crst, cyc_init, cyc_fini);
 #    endif
           }
 #  endif
@@ -1048,7 +1052,7 @@ namespace snmalloc
 #    endif
 #    if SNMALLOC_QUARANTINE_CHATTY == 1
             uint64_t cyc_fini = AAL::tick();
-            print_revoke_stats(stderr, "dbgf", a, &crst, cyc_fini - cyc_init);
+            print_revoke_stats(stderr, "dbgf", a, &crst, cyc_init, cyc_fini);
 #    endif
           }
 #  endif
