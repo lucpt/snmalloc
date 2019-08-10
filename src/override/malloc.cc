@@ -76,10 +76,13 @@ extern "C"
         "Calling realloc on pointer that is not to the start of an allocation");
     }
 #endif
+    // This must be called on an external pointer
     size_t sz = a->alloc_size(ptr);
+    void *privptr = a->pagemap().getp(ptr);
 #if SNMALLOC_CHERI_ALIGN == 1
     size = bits::align_up(size, 1 << CHERI_ALIGN_SHIFT(size));
 #endif
+
     // Keep the current allocation if the given size is in the same sizeclass.
     if (sz == sizeclass_to_size(size_to_sizeclass(size)))
     {
@@ -94,8 +97,7 @@ extern "C"
        * (Recall that SNMALLOC_CHERI_SETBOUNDS implies
        * SNMALLOC_PAGEMAP_REDERIVE, so our use of getp() here is justified.)
        */
-      void *privp = a->pagemap().getp(ptr);
-      return cheri_andperm(cheri_csetboundsexact(privp, size),
+      return cheri_andperm(cheri_csetboundsexact(privptr, size),
               CHERI_PERMS_USERSPACE_DATA & ~CHERI_PERM_CHERIABI_VMMAP);
 #else
       return ptr;
@@ -107,7 +109,7 @@ extern "C"
     {
       assert(p == a->external_pointer<Start>(p));
       sz = bits::min(size, sz);
-      memcpy(p, ptr, sz);
+      memcpy(p, privptr, sz);
       SNMALLOC_NAME_MANGLE(free)(ptr);
     }
     return p;
