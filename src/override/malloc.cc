@@ -77,9 +77,30 @@ extern "C"
     }
 #endif
     size_t sz = a->alloc_size(ptr);
+#if SNMALLOC_CHERI_ALIGN == 1
+    size = bits::align_up(size, 1 << CHERI_ALIGN_SHIFT(size));
+#endif
     // Keep the current allocation if the given size is in the same sizeclass.
     if (sz == sizeclass_to_size(size_to_sizeclass(size)))
+    {
+#if SNMALLOC_CHERI_SETBOUNDS == 1
+      /*
+       * We've bounded the original allocation to its actual size; so, even
+       * though we're not moving anything, we should adjust the bound.
+       * While we could adjust downwards without acquiring a privileged
+       * pointer, it's easier just to always grab the internal one and fall
+       * down again.
+       *
+       * (Recall that SNMALLOC_CHERI_SETBOUNDS implies
+       * SNMALLOC_PAGEMAP_REDERIVE, so our use of getp() here is justified.)
+       */
+      void *privp = a->pagemap().getp(ptr);
+      return cheri_andperm(cheri_csetboundsexact(privp, size),
+              CHERI_PERMS_USERSPACE_DATA & ~CHERI_PERM_CHERIABI_VMMAP);
+#else
       return ptr;
+#endif
+    }
 
     void* p = SNMALLOC_NAME_MANGLE(malloc)(size);
     if (p != nullptr)
