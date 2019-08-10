@@ -397,6 +397,9 @@ namespace snmalloc
     return nullptr;
   }
 
+  // XXX This should be in allocconfig, but it depends on the PAL
+  static constexpr auto DefaultZero = ZeroMem::NoZero;
+
   /**
    * Allocator.  This class is parameterised on three template parameters.  The
    * `MemoryProvider` defines the source of memory for this allocator.
@@ -1092,7 +1095,7 @@ namespace snmalloc
     // Allocate memory of a statically known size.
     template<
       size_t ssize,
-      ZeroMem zero_mem = NoZero,
+      ZeroMem zero_mem = DefaultZero,
       AllowReserve allow_reserve = YesReserve>
     SNMALLOC_FAST_PATH ALLOCATOR void* alloc()
     {
@@ -1149,7 +1152,7 @@ namespace snmalloc
     }
 
     // Allocate memory of a dynamically known size.
-    template<ZeroMem zero_mem = NoZero, AllowReserve allow_reserve = YesReserve>
+    template<ZeroMem zero_mem = DefaultZero, AllowReserve allow_reserve = YesReserve>
     SNMALLOC_FAST_PATH ALLOCATOR void* alloc(size_t dsize)
     {
 #ifdef USE_MALLOC
@@ -1197,7 +1200,7 @@ namespace snmalloc
       return ret;
     }
 
-    template<ZeroMem zero_mem = NoZero, AllowReserve allow_reserve = YesReserve>
+    template<ZeroMem zero_mem = DefaultZero, AllowReserve allow_reserve = YesReserve>
     SNMALLOC_SLOW_PATH ALLOCATOR void* alloc_not_small(size_t size)
     {
       handle_message_queue();
