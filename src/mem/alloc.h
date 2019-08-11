@@ -887,6 +887,12 @@ namespace snmalloc
         assert(filling != nullptr);
       }
 
+      static_assert(0 < SNMALLOC_QUARANTINE_CHUNK_SIZECLASS);
+      static_assert(SNMALLOC_QUARANTINE_CHUNK_SIZECLASS < NUM_SIZECLASSES);
+      static_assert(
+        sizeclass_to_size(SNMALLOC_QUARANTINE_CHUNK_SIZECLASS)
+        >= sizeof(QuarantineNode) + sizeof(QuarantineEntry));
+
     public:
       void init(Allocator* a)
       {

@@ -67,9 +67,22 @@ namespace snmalloc
  * knob here.  This is a sizeclass parameter and has only been tested with
  * medium classes, * somewhere between NUM_SMALL_CLASSES and
  * NUM_SIZECLASSES-1.
+ *
+ * For ease of refering to the endpoints of the spectrum from outside the
+ * allocator's C source we also map some implausible numbers to those, and
+ * reserve the right to extend this table:
+ *
+ *   -1024 : NUM_SMALL_CLASSES
+ *   -2048 : NUM_SIZECLASSES-1
  */
-#  ifndef SNMALLOC_QUARANTINE_CHUNK_SIZECLASS
+#  if !defined(SNMALLOC_QUARANTINE_CHUNK_SIZECLASS)
 #    define SNMALLOC_QUARANTINE_CHUNK_SIZECLASS (NUM_SMALL_CLASSES)
+#  elif SNMALLOC_QUARANTINE_CHUNK_SIZECLASS == -1024
+#    undef SNMALLOC_QUARANTINE_CHUNK_SIZECLASS
+#    define SNMALLOC_QUARANTINE_CHUNK_SIZECLASS (NUM_SMALL_CLASSES)
+#  elif SNMALLOC_QUARANTINE_CHUNK_SIZECLASS == -2048
+#    undef SNMALLOC_QUARANTINE_CHUNK_SIZECLASS
+#    define SNMALLOC_QUARANTINE_CHUNK_SIZECLASS (NUM_SIZECLASSES-1)
 #  endif
 
 #endif
