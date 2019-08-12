@@ -561,6 +561,19 @@ namespace snmalloc
       struct QuarantineNode* filling;
       uint16_t filling_left;
 
+      inline bool policy_full()
+      {
+        bool full = false;
+
+        full |= SNMALLOC_QUARANTINE_PER_ALLOC_THRESHOLD
+                < (waiting_footprint + (filling ? filling->footprint : 0));
+#  ifdef SNMALLOC_QUARANTINE_PER_ALLOC_CHUNK_THRESHOLD
+        full |= n_waiting > SNMALLOC_QUARANTINE_PER_ALLOC_CHUNK_THRESHOLD;
+#  endif
+
+        return full;
+      }
+
       static struct QuarantineNode* newqn(Allocator* a, uint8_t sc)
       {
         struct QuarantineNode* qn;
@@ -864,14 +877,7 @@ namespace snmalloc
         drain(a, epoch);
 #  endif
 
-        bool full = false;
-
-        full |= waiting_footprint > SNMALLOC_QUARANTINE_PER_ALLOC_THRESHOLD;
-#  ifdef SNMALLOC_QUARANTINE_PER_ALLOC_CHUNK_THRESHOLD
-        full |= n_waiting > SNMALLOC_QUARANTINE_PER_ALLOC_CHUNK_THRESHOLD;
-#  endif
-
-        if ((filling == nullptr) && full)
+        if ((filling == nullptr) && policy_full())
         {
           quarantine_step_drain(a, "full");
         }
@@ -976,7 +982,11 @@ namespace snmalloc
 
         filling->footprint += psize;
 
-        if (filling_left == 0)
+        bool step = (filling_left == 0);
+        if constexpr (SNMALLOC_QUARANTINE_POLICY_STRICT == 1)
+          step |= policy_full();
+
+        if (step)
         {
           quarantine_step(a);
         }
