@@ -107,6 +107,10 @@ namespace snmalloc
 #    error Doing nothing while being paranoid will not work out well.
 #  endif
 
+#  if (SNMALLOC_REVOKE_DRY_RUN == 1) && (SNMALLOC_QUARANTINE_CHATTY == 1)
+#    error Refusing to raise much ado about nothing
+#  endif
+
 #  if SNMALLOC_QUARANTINE_DEALLOC == 0
 #    error Revocation depends upon quarantine.
 #  endif

@@ -795,6 +795,8 @@ namespace snmalloc
           int res = caprevoke(CAPREVOKE_LAST_PASS, qn->full_epoch, &crst);
           UNUSED(res);
           assert(res == 0);
+#    else
+          crst.epoch_fini = 4;
 #    endif
 #    if SNMALLOC_QUARANTINE_CHATTY == 1
           uint64_t cyc_fini = AAL::tick();
@@ -826,6 +828,9 @@ namespace snmalloc
             CAPREVOKE_IGNORE_START | CAPREVOKE_ONLY_IF_OPEN, 0, &crst);
           UNUSED(res);
           assert(res == 0);
+#    else
+          crst.epoch_init = 0;
+          crst.epoch_fini = 4;
 #    endif
 #    if SNMALLOC_QUARANTINE_CHATTY == 1
           uint64_t cyc_fini = AAL::tick();
