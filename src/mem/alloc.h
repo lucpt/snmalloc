@@ -398,7 +398,13 @@ namespace snmalloc
   }
 
   // XXX This should be in allocconfig, but it depends on the PAL
-  static constexpr auto DefaultZero = ZeroMem::NoZero;
+  static constexpr auto DefaultZero =
+#ifdef SNMALLOC_DEFAULT_ZERO
+    SNMALLOC_DEFAULT_ZERO
+#else
+    ZeroMem::NoZero
+#endif
+    ;
 
   /**
    * Allocator.  This class is parameterised on three template parameters.  The
